@@ -5,7 +5,7 @@ import {
   listResources,
   upsertResource
 } from '../config/index.js';
-import { testServiceBind, setBindPassword } from '../services/ldapService.js';
+import { testServiceBind, setBindPassword, parseLdapError } from '../services/ldapService.js';
 import { startLogin as startCloudflareLogin } from '../services/cloudflareService.js';
 import { sambaManager } from '../services/sambaService.js';
 import { storeSmtpPassword } from '../services/otpService.js';
@@ -83,7 +83,11 @@ router.post('/api/setup/ldap', async (req, res, next) => {
 
     res.json({ success: true });
   } catch (error) {
-    next(error);
+    // testServiceBind already parses errors, but double-check for any unparsed errors
+    const errorMessage = error.message && !error.message.includes('0x') && !error.message.includes('data ')
+      ? error.message
+      : parseLdapError(error);
+    return res.status(400).json({ error: errorMessage });
   }
 });
 

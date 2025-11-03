@@ -62,6 +62,79 @@ async function bindServiceAccount(client, config, passwordOverride) {
   await client.bind(config.auth.lookupUser, password);
 }
 
+export function parseLdapError(error) {
+  if (!error || !error.message) {
+    return 'LDAP connection failed. Please check your configuration.';
+  }
+
+  const message = error.message.toString();
+  
+  // Windows LDAP error codes (hex format, e.g., "data 52e")
+  const windowsErrorCodes = {
+    '49': 'Invalid credentials. Please check your username and password.',
+    '52e': 'Invalid credentials. The username or password is incorrect.',
+    '52f': 'Invalid credentials. The account does not have permission to log on.',
+    '530': 'Not permitted to log on at this time. Check account logon hours.',
+    '531': 'Not permitted to log on from this workstation.',
+    '532': 'Password expired. Please update your password.',
+    '533': 'Account is disabled. Contact your administrator.',
+    '701': 'Account has expired. Contact your administrator.',
+    '775': 'User account is locked. Contact your administrator.',
+    '525': 'User not found. Check the username and domain.'
+  };
+
+  // Extract error code from messages like "data 52e" or "Code: 0x31" or "data 49"
+  const dataMatch = message.match(/data\s+([0-9a-fA-F]+)/i);
+  const codeMatch = message.match(/Code:\s*0x([0-9a-fA-F]+)/i);
+  const hexCode = dataMatch ? dataMatch[1].toLowerCase() : (codeMatch ? codeMatch[1].toLowerCase() : null);
+  
+  // Check Windows error codes (in hex format as they appear in error messages)
+  if (hexCode && windowsErrorCodes[hexCode]) {
+    return windowsErrorCodes[hexCode];
+  }
+
+  // Also check if hex code when converted to decimal matches standard LDAP codes
+  if (hexCode) {
+    try {
+      const decimalCode = parseInt(hexCode, 16).toString();
+      // Standard LDAP result codes (0-127)
+      const ldapCodes = {
+        '49': 'Invalid credentials. Please check your username and password.',
+        '50': 'Insufficient access rights.',
+        '51': 'Server is unavailable.',
+        '52': 'Server is unwilling to perform the operation.',
+        '53': 'Loop detected.',
+        '81': 'Server is unavailable.'
+      };
+      if (ldapCodes[decimalCode]) {
+        return ldapCodes[decimalCode];
+      }
+    } catch (e) {
+      // Ignore parse errors
+    }
+  }
+
+  // Check for common error patterns
+  if (message.includes('ECONNREFUSED') || message.includes('ENOTFOUND')) {
+    return 'Cannot connect to LDAP server. Check the LDAP host and port.';
+  }
+  
+  if (message.includes('ETIMEDOUT') || message.includes('timeout')) {
+    return 'Connection to LDAP server timed out. Check network connectivity.';
+  }
+  
+  if (message.includes('certificate') || message.includes('TLS') || message.includes('SSL')) {
+    return 'TLS/SSL certificate error. Try disabling LDAPS or check certificate settings.';
+  }
+
+  if (message.includes('AcceptSecurityContext') || message.includes('Invalid credentials') || message.includes('Logon failure')) {
+    return 'Invalid credentials. Please check your username and password.';
+  }
+
+  // Fallback: return sanitized error message
+  return `LDAP error: ${message.slice(0, 200)}`;
+}
+
 export async function testServiceBind(settings, password, { rejectUnauthorized = true } = {}) {
   const client = new Client({
     url: buildUrl({ useLdaps: settings.useLdaps, ldapHost: settings.ldapHost, ldapPort: settings.ldapPort }),
@@ -74,6 +147,11 @@ export async function testServiceBind(settings, password, { rejectUnauthorized =
   try {
     await client.bind(settings.lookupUser, password);
     return true;
+  } catch (error) {
+    // Re-throw with parsed error message
+    const friendlyError = new Error(parseLdapError(error));
+    friendlyError.originalError = error;
+    throw friendlyError;
   } finally {
     await client.unbind().catch(() => {});
   }
