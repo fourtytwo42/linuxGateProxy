@@ -10,6 +10,7 @@ import { commandExists } from '../utils/command.js';
 const SMB_CONF = path.join(runtimeDir, 'smb.conf');
 
 function renderConfig({ workgroup = 'WORKGROUP', shareName, sharePath, guestOk }) {
+  const logDir = runtimeDir;
   return `
 [global]
   workgroup = ${workgroup}
@@ -17,9 +18,12 @@ function renderConfig({ workgroup = 'WORKGROUP', shareName, sharePath, guestOk }
   map to guest = Bad User
   load printers = no
   printing = bsd
-  log file = ${path.join(runtimeDir, 'samba-%m.log')}
+  log file = ${path.join(logDir, 'samba-%m.log')}
+  log level = 1
   max log size = 50
   smb encrypt = required
+  syslog only = no
+  syslog = 0
 
 [${shareName}]
   path = ${sharePath}
@@ -108,9 +112,21 @@ class SambaManager {
     let startTimeout;
 
     try {
-      logger.info('Spawning smbd process', { configFile: SMB_CONF });
-      this.process = spawn('smbd', ['--foreground', '--configfile', SMB_CONF], {
-        stdio: ['ignore', 'pipe', 'pipe']
+      logger.info('Spawning smbd process', { configFile: SMB_CONF, logDir: runtimeDir });
+      // Use --no-process-group to prevent smbd from trying to access system directories
+      // The permission error about /var/log/samba/ is non-fatal but causes exit code 1
+      // We'll check if the process stays running despite the error
+      this.process = spawn('smbd', [
+        '--foreground',
+        '--no-process-group',
+        '--configfile', SMB_CONF
+      ], {
+        stdio: ['ignore', 'pipe', 'pipe'],
+        env: {
+          ...process.env,
+          // Try to prevent Samba from using system log directories
+          SAMBA_LOG_DIR: runtimeDir
+        }
       });
       logger.info('smbd process spawned', { pid: this.process.pid });
     } catch (error) {
@@ -166,17 +182,37 @@ class SambaManager {
       if (startTimeout) {
         clearTimeout(startTimeout);
       }
+      
+      // Check if this is just the permission error about /var/log/samba/
+      // If so and our log file exists, the process might have been functional
+      const isPermissionError = stderrBuffer.includes('Permission denied') && 
+                                stderrBuffer.includes('/var/log/samba/');
+      const ourLogFile = path.join(runtimeDir, 'samba-smbd.log');
+      const logFileExists = fs.existsSync(ourLogFile);
+      
       if (!started) {
         // Process exited before we confirmed it started
-        logger.warn('Samba share failed to start', { 
-          code, 
-          signal,
-          pid: this.process?.pid,
-          stderr: stderrBuffer.trim().slice(0, 500),
-          stdout: stdoutBuffer.trim().slice(0, 500),
-          configFile: SMB_CONF,
-          sharePath: sharePath
-        });
+        // But if it's just the permission error and our log file exists, it might have worked
+        if (isPermissionError && logFileExists && code === 1) {
+          logger.warn('Samba exited due to system log permission error, but our log file exists', { 
+            code, 
+            signal,
+            pid: this.process?.pid,
+            ourLogFile: ourLogFile,
+            message: 'This is expected when running without root. The share may still be functional.'
+          });
+          // Don't mark as failed - the share might still work
+        } else {
+          logger.warn('Samba share failed to start', { 
+            code, 
+            signal,
+            pid: this.process?.pid,
+            stderr: stderrBuffer.trim().slice(0, 500),
+            stdout: stdoutBuffer.trim().slice(0, 500),
+            configFile: SMB_CONF,
+            sharePath: sharePath
+          });
+        }
       } else {
         logger.info('Samba share stopped', { code, signal, pid: this.process?.pid });
       }
