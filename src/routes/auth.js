@@ -120,7 +120,7 @@ router.post('/api/login', loginLimiter, async (req, res, next) => {
     const hasWebAuthn = credentials.length > 0;
 
     if (requireWebAuthn && hasWebAuthn) {
-      const options = await beginAuthentication(user);
+      const options = await beginAuthentication(user, req);
       pending.stage = 'webauthn';
       pending.credentials = credentials;
       pending.options = options;
@@ -128,7 +128,7 @@ router.post('/api/login', loginLimiter, async (req, res, next) => {
     }
 
     if (requireWebAuthn && !hasWebAuthn) {
-      const options = await beginRegistration(user);
+      const options = await beginRegistration(user, req);
       pending.stage = 'register-webauthn';
       pending.options = options;
       return res.json({ status: 'webauthn-register', pendingId: pending.id, options });

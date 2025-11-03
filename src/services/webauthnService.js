@@ -12,21 +12,59 @@ import { logger } from '../utils/logger.js';
 const registrationCache = new Map();
 const authenticationCache = new Map();
 
-function getRp(config) {
-  try {
-    const url = new URL(config.site.publicBaseUrl || 'https://localhost');
-    return {
-      rpName: 'Linux Gate Proxy',
-      rpID: url.hostname,
-      origin: `${url.protocol}//${url.host}`
-    };
-  } catch (error) {
-    return {
-      rpName: 'Linux Gate Proxy',
-      rpID: 'localhost',
-      origin: 'http://localhost'
-    };
+function getRp(config, req = null) {
+  // If request is provided and publicBaseUrl is localhost/127.0.0.1, use request origin
+  // Otherwise, use the configured publicBaseUrl for consistency
+  let origin;
+  let rpID;
+  
+  if (req) {
+    // Use request origin for localhost/127.0.0.1 access
+    const protocol = req.secure || req.get('x-forwarded-proto') === 'https' ? 'https' : 'http';
+    const hostHeader = req.get('host') || 'localhost:5000';
+    const hostname = hostHeader.split(':')[0];
+    const port = hostHeader.split(':')[1] || (req.socket?.localPort);
+    
+    // Construct origin - include port for WebAuthn (browser always includes it when non-default)
+    if (port && port !== '80' && port !== '443') {
+      origin = `${protocol}://${hostname}:${port}`;
+    } else {
+      origin = `${protocol}://${hostname}`;
+    }
+    
+    // For localhost/127.0.0.1, use 'localhost' as rpID (works for both)
+    if (hostname === 'localhost' || hostname === '127.0.0.1' || hostname.startsWith('192.168.') || hostname.startsWith('10.') || hostname.startsWith('172.')) {
+      rpID = 'localhost';
+    } else {
+      rpID = hostname;
+    }
   }
+  
+  // If publicBaseUrl is configured and is a real domain (not localhost), use it
+  if (config.site.publicBaseUrl) {
+    try {
+      const url = new URL(config.site.publicBaseUrl);
+      // Use configured domain if it's not localhost/127.0.0.1
+      if (url.hostname !== 'localhost' && url.hostname !== '127.0.0.1') {
+        rpID = url.hostname;
+        origin = `${url.protocol}//${url.host}`;
+      }
+    } catch (error) {
+      // Invalid URL, use request origin if available
+    }
+  }
+  
+  // Fallback to localhost if nothing else works
+  if (!rpID || !origin) {
+    rpID = 'localhost';
+    origin = 'http://localhost';
+  }
+  
+  return {
+    rpName: 'Linux Gate Proxy',
+    rpID,
+    origin
+  };
 }
 
 function toCredentialDescriptor(credential) {
@@ -37,9 +75,9 @@ function toCredentialDescriptor(credential) {
   };
 }
 
-export async function beginRegistration(user) {
+export async function beginRegistration(user, req = null) {
   const config = loadConfig();
-  const rp = getRp(config);
+  const rp = getRp(config, req);
   const existing = await readWebAuthnCredentials(user.distinguishedName || user.dn);
   if (existing.length > 0) {
     throw new Error('WebAuthn credential already registered');
@@ -110,9 +148,9 @@ export async function finishRegistration(user, credential) {
   return newCredential;
 }
 
-export async function beginAuthentication(user) {
+export async function beginAuthentication(user, req = null) {
   const config = loadConfig();
-  const rp = getRp(config);
+  const rp = getRp(config, req);
   const credentials = await readWebAuthnCredentials(user.distinguishedName || user.dn);
   if (credentials.length === 0) {
     throw new Error('No WebAuthn credentials registered');
