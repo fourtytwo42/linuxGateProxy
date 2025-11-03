@@ -90,12 +90,12 @@ class SambaManager {
     }
 
     this.process.on('error', (error) => {
-      logger.error('Samba share error', { error: error.message });
+      logger.warn('Samba share unavailable', { error: error.message });
       this.process = null;
     });
 
     this.process.on('exit', (code, signal) => {
-      logger.warn('Samba share stopped', { code, signal });
+    logger.warn('Samba share stopped', { code, signal });
       this.process = null;
     });
 

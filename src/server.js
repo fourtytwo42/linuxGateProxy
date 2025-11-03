@@ -26,7 +26,7 @@ async function startServer() {
 
   const app = express();
 
-  app.set('trust proxy', true);
+  app.set('trust proxy', ['loopback', 'linklocal', 'uniquelocal']);
 
   app.use(helmet({
     contentSecurityPolicy: false
@@ -34,10 +34,26 @@ async function startServer() {
   app.use(express.json({ limit: '1mb' }));
   app.use(express.urlencoded({ extended: false }));
   app.use(cookieParser());
-  app.use(authenticate);
 
   app.use(express.static(publicDir, { index: false }));
   app.use('/assets', express.static(path.join(publicDir, 'assets')));
+
+  app.use((req, res, next) => {
+    const config = loadConfig();
+    req.gateConfig = config;
+    if (!config.setup.completed) {
+      const allowed = req.path.startsWith('/setup')
+        || req.path.startsWith('/api/setup')
+        || req.path.startsWith('/assets')
+        || req.path === '/healthz';
+      if (!allowed) {
+        return res.redirect('/setup');
+      }
+    }
+    return next();
+  });
+
+  app.use(authenticate);
 
   app.get('/setup', (req, res) => {
     const config = loadConfig();

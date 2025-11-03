@@ -35,6 +35,12 @@ export function setBindPassword(password) {
 }
 
 function createClient(config, { rejectUnauthorized = true } = {}) {
+  if (!config.setup.completed) {
+    throw new Error('Directory services not configured');
+  }
+  if (!config.auth.ldapHost) {
+    throw new Error('LDAP host not configured');
+  }
   const options = {
     url: buildUrl(config.auth),
     timeout: 5000

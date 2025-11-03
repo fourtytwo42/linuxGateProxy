@@ -9,6 +9,10 @@ function isApiRequest(req) {
 export async function authenticate(req, res, next) {
   try {
     const config = loadConfig();
+    if (!config.setup.completed) {
+      req.auth = null;
+      return next();
+    }
     const cookieName = config.site.cookieName;
     const token = req.cookies?.[cookieName];
     if (!token) {
@@ -31,13 +35,16 @@ export async function authenticate(req, res, next) {
 }
 
 export function requireAuth(req, res, next) {
+  const config = loadConfig();
+  if (!config.setup.completed) {
+    return res.redirect('/setup');
+  }
   if (req.auth?.user) {
     return next();
   }
   if (isApiRequest(req)) {
     return res.status(401).json({ error: 'Authentication required' });
   }
-  const config = loadConfig();
   return res.redirect(`/login?returnUrl=${encodeURIComponent(req.originalUrl || '/')}`);
 }
 
