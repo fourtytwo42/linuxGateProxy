@@ -217,24 +217,18 @@ sambaForm.addEventListener('submit', async (event) => {
 });
 
 // Step 4 - Cloudflare
-let cloudflareSessionId = null;
-
 document.getElementById('cloudflare-start').addEventListener('click', async (event) => {
   event.preventDefault();
   cloudflareStatus.innerHTML = '<p>Requesting login link...</p>';
   try {
     const response = await postJson('/api/setup/cloudflare/start', {});
-    cloudflareSessionId = response.sessionId;
     cloudflareStatus.innerHTML = `
       <p class="mb-2">Open the following URL to authenticate with Cloudflare:</p>
       <p><a href="${response.url}" target="_blank" rel="noopener">${response.url}</a></p>
       ${response.deviceCode ? `<p class="mt-2">Device Code: <strong>${response.deviceCode}</strong></p>` : ''}
-      <p class="mt-3">Leave this tab open—authentication will finalize automatically.</p>
+      <p class="mt-3">After authenticating, click Continue below.</p>
     `;
-
-    const completion = await postJson('/api/setup/cloudflare/complete', { sessionId: cloudflareSessionId });
-    setupState.cloudflare = completion;
-    cloudflareStatus.innerHTML += '<p class="mt-3 has-text-success">Cloudflare certificate stored successfully.</p>';
+    setupState.cloudflare = { configured: true };
   } catch (error) {
     cloudflareStatus.innerHTML = `<p class="has-text-danger">${error.message}</p>`;
   }

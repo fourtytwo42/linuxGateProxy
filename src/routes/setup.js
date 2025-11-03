@@ -1,5 +1,4 @@
 import { Router } from 'express';
-import crypto from 'crypto';
 import {
   loadConfig,
   saveConfigSection,
@@ -12,7 +11,6 @@ import { sambaManager } from '../services/sambaService.js';
 import { storeSmtpPassword } from '../services/otpService.js';
 
 const router = Router();
-const cloudflareSessions = new Map();
 
 router.get('/api/setup/status', (req, res) => {
   const config = loadConfig();
@@ -185,28 +183,10 @@ router.post('/api/setup/proxy', (req, res) => {
 router.post('/api/setup/cloudflare/start', async (req, res, next) => {
   try {
     const session = await startCloudflareLogin();
-    const sessionId = crypto.randomUUID();
-    cloudflareSessions.set(sessionId, session.completion);
     res.json({
-      sessionId,
       url: session.url,
       deviceCode: session.deviceCode
     });
-  } catch (error) {
-    next(error);
-  }
-});
-
-router.post('/api/setup/cloudflare/complete', async (req, res, next) => {
-  try {
-    const { sessionId } = req.body;
-    const completion = cloudflareSessions.get(sessionId);
-    if (!completion) {
-      return res.status(404).json({ error: 'Session not found' });
-    }
-    cloudflareSessions.delete(sessionId);
-    const result = await completion;
-    res.json({ success: true, certPath: result.certPath });
   } catch (error) {
     next(error);
   }

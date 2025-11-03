@@ -10,47 +10,42 @@ const DEFAULT_CERT_PATH = path.join(os.homedir(), '.cloudflared', 'cert.pem');
 
 export function startLogin() {
   return new Promise((resolve, reject) => {
-    const proc = spawn('cloudflared', ['tunnel', 'login', '--no-autoupdate'], {
-      env: { ...process.env, NO_COLOR: '1' }
-    });
-
+    let proc;
+    let lines;
     let loginUrl = null;
     let deviceCode = null;
     let resolved = false;
 
-    const lines = readline.createInterface({ input: proc.stdout });
+    const cleanup = () => {
+      if (lines) {
+        lines.close();
+      }
+    };
 
-    const completion = new Promise((completionResolve, completionReject) => {
-      proc.on('error', (error) => {
+    proc = spawn('cloudflared', ['tunnel', 'login', '--no-autoupdate'], {
+      env: { ...process.env, NO_COLOR: '1' }
+    });
+
+    proc.on('error', (error) => {
+      cleanup();
+      if (!resolved) {
+        reject(error);
+        resolved = true;
+      }
+    });
+
+    proc.on('exit', (code) => {
+      cleanup();
+      if (code !== 0) {
+        const error = new Error(`cloudflared exited with code ${code}`);
         if (!resolved) {
           reject(error);
           resolved = true;
-        } else {
-          completionReject(error);
         }
-      });
-
-      proc.on('exit', (code) => {
-        if (code !== 0) {
-          const error = new Error(`cloudflared exited with code ${code}`);
-          if (!resolved) {
-            reject(error);
-            resolved = true;
-          } else {
-            completionReject(error);
-          }
-          return;
-        }
-
-        try {
-          const cert = fs.readFileSync(DEFAULT_CERT_PATH, 'utf-8');
-          setSecret('cloudflare.certPem', cert);
-          completionResolve({ certPath: DEFAULT_CERT_PATH, cert });
-        } catch (error) {
-          completionReject(error);
-        }
-      });
+      }
     });
+
+    lines = readline.createInterface({ input: proc.stdout });
 
     lines.on('line', (line) => {
       if (!loginUrl) {
@@ -70,8 +65,7 @@ export function startLogin() {
         resolved = true;
         resolve({
           url: loginUrl,
-          deviceCode,
-          completion
+          deviceCode
         });
       }
     });
