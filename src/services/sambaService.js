@@ -61,8 +61,24 @@ class SambaManager {
       logger.warn('Samba binaries not found; skipping share startup');
       return;
     }
+    
+    logger.info('Starting Samba share', { setupCompleted: loadConfig().setup.completed });
+    
+    if (!loadConfig().setup.completed) {
+      logger.info('Skipping Samba startup - setup not completed yet');
+      return;
+    }
+    
     const config = loadConfig();
     const sharePath = config.samba.sharePath || shareDir;
+    
+    logger.info('Samba configuration', { 
+      shareName: config.samba.shareName, 
+      sharePath, 
+      guestOk: config.samba.guestOk,
+      workgroup: config.auth.domain?.split('.')[0].toUpperCase() || 'WORKGROUP'
+    });
+    
     this.ensureShareDirectory(sharePath);
 
     if (!config.samba.sharePath) {
@@ -80,8 +96,11 @@ class SambaManager {
 
     ensureDirSync(runtimeDir);
     writeFileSecureSync(SMB_CONF, conf);
+    
+    logger.info('Samba config file written', { configPath: SMB_CONF });
 
     if (this.process) {
+      logger.info('Samba process already running, skipping start');
       return;
     }
 
@@ -89,16 +108,18 @@ class SambaManager {
     let startTimeout;
 
     try {
+      logger.info('Spawning smbd process', { configFile: SMB_CONF });
       this.process = spawn('smbd', ['--foreground', '--configfile', SMB_CONF], {
         stdio: ['ignore', 'pipe', 'pipe']
       });
+      logger.info('smbd process spawned', { pid: this.process.pid });
     } catch (error) {
-      logger.error('Failed to launch smbd', { error: error.message });
+      logger.error('Failed to launch smbd', { error: error.message, stack: error.stack });
       return;
     }
 
     if (!this.process) {
-      logger.warn('Samba process is null');
+      logger.warn('Samba process is null after spawn');
       return;
     }
 
@@ -106,13 +127,24 @@ class SambaManager {
     this.process.stderr.setEncoding('utf8');
     
     let stderrBuffer = '';
-    this.process.stdout.on('data', () => {});
+    let stdoutBuffer = '';
+    
+    this.process.stdout.on('data', (data) => {
+      stdoutBuffer += data.toString();
+      logger.debug('Samba stdout', { data: data.toString().slice(0, 200) });
+    });
+    
     this.process.stderr.on('data', (data) => {
-      stderrBuffer += data;
-      // Suppress known permission errors that don't prevent operation
-      if (data.includes('Permission denied') && data.includes('/var/log/samba/')) {
-        // Silently ignore - we're using our own log directory
-        return;
+      const dataStr = data.toString();
+      stderrBuffer += dataStr;
+      
+      // Log all stderr for debugging, but mark known non-critical errors
+      if (dataStr.includes('Permission denied') && dataStr.includes('/var/log/samba/')) {
+        logger.debug('Samba log directory permission warning (non-critical)', { 
+          message: dataStr.trim().slice(0, 200) 
+        });
+      } else {
+        logger.debug('Samba stderr', { data: dataStr.slice(0, 200) });
       }
     });
 
@@ -120,7 +152,12 @@ class SambaManager {
       if (startTimeout) {
         clearTimeout(startTimeout);
       }
-      logger.warn('Samba share unavailable', { error: error.message });
+      logger.error('Samba process error', { 
+        error: error.message, 
+        code: error.code,
+        stderr: stderrBuffer.trim().slice(0, 500),
+        stdout: stdoutBuffer.trim().slice(0, 500)
+      });
       this.process = null;
       started = false;
     });
@@ -131,9 +168,17 @@ class SambaManager {
       }
       if (!started) {
         // Process exited before we confirmed it started
-        logger.warn('Samba share failed to start', { code, signal, stderr: stderrBuffer.trim().slice(0, 200) });
+        logger.warn('Samba share failed to start', { 
+          code, 
+          signal,
+          pid: this.process?.pid,
+          stderr: stderrBuffer.trim().slice(0, 500),
+          stdout: stdoutBuffer.trim().slice(0, 500),
+          configFile: SMB_CONF,
+          sharePath: sharePath
+        });
       } else {
-        logger.warn('Samba share stopped', { code, signal });
+        logger.info('Samba share stopped', { code, signal, pid: this.process?.pid });
       }
       this.process = null;
       started = false;

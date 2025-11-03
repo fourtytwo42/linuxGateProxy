@@ -2,6 +2,7 @@ import { Router } from 'express';
 import crypto from 'crypto';
 import path from 'path';
 import { loadConfig } from '../config/index.js';
+import { logger } from '../utils/logger.js';
 import {
   findUser,
   userHasGroup,
@@ -76,19 +77,35 @@ router.get('/logout', async (req, res) => {
 router.post('/api/login', loginLimiter, async (req, res, next) => {
   try {
     const { username, password, returnUrl = '/' } = req.body;
+    logger.info('Login attempt', { username, hasPassword: !!password, returnUrl });
+    
     if (!username || !password) {
+      logger.warn('Login attempt with missing credentials', { hasUsername: !!username, hasPassword: !!password });
       return res.status(400).json({ error: 'Missing credentials' });
     }
 
+    logger.debug('Looking up user in LDAP', { username });
     const user = await findUser(username, { attributes: ['memberOf', 'mail'] });
     if (!user) {
+      logger.warn('User not found in LDAP', { username });
       return res.status(401).json({ error: 'Invalid credentials' });
     }
+    logger.info('User found in LDAP', { 
+      username: user.sAMAccountName || user.userPrincipalName, 
+      dn: user.distinguishedName || user.dn 
+    });
 
+    logger.debug('Validating user credentials');
     const valid = await validateCredentials(user.distinguishedName || user.dn, password);
     if (!valid) {
+      logger.warn('Invalid credentials for user', { 
+        username: user.sAMAccountName || user.userPrincipalName 
+      });
       return res.status(401).json({ error: 'Invalid credentials' });
     }
+    logger.info('Credentials validated successfully', { 
+      username: user.sAMAccountName || user.userPrincipalName 
+    });
 
     const config = loadConfig();
     const allowedGroups = config.auth.allowedGroupDns || [];
