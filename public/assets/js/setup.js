@@ -341,24 +341,50 @@ document.getElementById('cloudflare-start').addEventListener('click', async (eve
   cloudflareStatus.innerHTML = '<p>Requesting login link...</p>';
   try {
     const response = await postJson('/api/setup/cloudflare/start', {});
-    cloudflareStatus.innerHTML = `
-      <p class="mb-2">Open the following URL to authenticate with Cloudflare:</p>
-      <p><a href="${response.url}" target="_blank" rel="noopener">${response.url}</a></p>
-      ${response.deviceCode ? `<p class="mt-2">Device Code: <strong>${response.deviceCode}</strong></p>` : ''}
-      <p class="mt-3">After authenticating, click Continue below.</p>
-    `;
-    setupState.cloudflare = { configured: true };
+    
+    if (response.alreadyAuthenticated) {
+      cloudflareStatus.innerHTML = `
+        <div class="notification is-success">
+          <p><strong>Already Authenticated!</strong></p>
+          <p>Cloudflare authentication is already complete. You can continue to the next step.</p>
+        </div>
+      `;
+      setupState.cloudflare = { configured: true };
+    } else if (response.url) {
+      cloudflareStatus.innerHTML = `
+        <p class="mb-2">Open the following URL to authenticate with Cloudflare:</p>
+        <p><a href="${response.url}" target="_blank" rel="noopener">${response.url}</a></p>
+        ${response.deviceCode ? `<p class="mt-2">Device Code: <strong>${response.deviceCode}</strong></p>` : ''}
+        <p class="mt-3">After authenticating, click Continue below.</p>
+      `;
+      setupState.cloudflare = { configured: false, url: response.url };
+    } else {
+      cloudflareStatus.innerHTML = `<p class="has-text-danger">No login URL was generated.</p>`;
+    }
   } catch (error) {
     cloudflareStatus.innerHTML = `<p class="has-text-danger">${error.message}</p>`;
   }
 });
 
-document.getElementById('cloudflare-next').addEventListener('click', (event) => {
+document.getElementById('cloudflare-next').addEventListener('click', async (event) => {
   event.preventDefault();
+  
+  // Check if already authenticated
   if (!setupState.cloudflare) {
-    showAlert('Complete Cloudflare authentication before continuing.');
-    return;
+    try {
+      const status = await loadStatus();
+      if (status.cloudflareConfigured) {
+        setupState.cloudflare = { configured: true };
+      } else {
+        showAlert('Complete Cloudflare authentication before continuing.');
+        return;
+      }
+    } catch (error) {
+      showAlert('Error checking Cloudflare authentication status.');
+      return;
+    }
   }
+  
   showStep(6);
 });
 

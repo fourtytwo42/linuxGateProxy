@@ -14,6 +14,16 @@ export function startLogin() {
       reject(new Error('cloudflared binary is not installed. Install it before continuing.'));
       return;
     }
+
+    // If certificate already exists, authentication is complete
+    if (hasCertificate()) {
+      resolve({
+        url: null,
+        deviceCode: null,
+        alreadyAuthenticated: true
+      });
+      return;
+    }
     
     let proc;
     let loginUrl = null;

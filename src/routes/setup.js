@@ -39,7 +39,7 @@ router.get('/api/setup/status', (req, res) => {
       adminGroupDns: config.auth.adminGroupDns,
       allowedGroupDns: config.auth.allowedGroupDns
     },
-    cloudflareConfigured: Boolean(config.cloudflare.certPem),
+    cloudflareConfigured: Boolean(config.cloudflare.certPem) || hasCertificate(),
     smtp: config.smtp,
     resources: listResources()
   });
@@ -201,7 +201,8 @@ router.post('/api/setup/cloudflare/start', async (req, res, next) => {
     const session = await startCloudflareLogin();
     res.json({
       url: session.url,
-      deviceCode: session.deviceCode
+      deviceCode: session.deviceCode,
+      alreadyAuthenticated: session.alreadyAuthenticated || false
     });
   } catch (error) {
     next(error);
