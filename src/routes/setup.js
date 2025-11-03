@@ -6,7 +6,13 @@ import {
   upsertResource
 } from '../config/index.js';
 import { testServiceBind, setBindPassword, parseLdapError } from '../services/ldapService.js';
-import { startLogin as startCloudflareLogin } from '../services/cloudflareService.js';
+import {
+  startLogin as startCloudflareLogin,
+  listTunnels,
+  getTunnelToken,
+  createTunnel,
+  hasCertificate
+} from '../services/cloudflareService.js';
 import { sambaManager } from '../services/sambaService.js';
 import { storeSmtpPassword } from '../services/otpService.js';
 import { commandExists } from '../utils/command.js';
@@ -197,6 +203,72 @@ router.post('/api/setup/cloudflare/start', async (req, res, next) => {
       url: session.url,
       deviceCode: session.deviceCode
     });
+  } catch (error) {
+    next(error);
+  }
+});
+
+router.get('/api/setup/cloudflare/tunnels', async (req, res, next) => {
+  try {
+    if (!hasCertificate()) {
+      return res.status(400).json({ error: 'Cloudflare certificate not found. Please login first.' });
+    }
+    const tunnels = await listTunnels();
+    res.json({ tunnels });
+  } catch (error) {
+    next(error);
+  }
+});
+
+router.post('/api/setup/cloudflare/token', async (req, res, next) => {
+  try {
+    const { tunnelName } = req.body;
+    if (!tunnelName) {
+      return res.status(400).json({ error: 'Tunnel name or UUID is required.' });
+    }
+    if (!hasCertificate()) {
+      return res.status(400).json({ error: 'Cloudflare certificate not found. Please login first.' });
+    }
+    const token = await getTunnelToken(tunnelName);
+    
+    // Save tunnel configuration
+    const config = loadConfig();
+    saveConfigSection('cloudflare', {
+      ...config.cloudflare,
+      tunnelName: tunnelName,
+      credentialFile: token.credentialFile || '',
+      accountTag: token.AccountTag || '',
+      certPem: token.certPem || ''
+    });
+
+    res.json({ success: true, tunnel: { name: tunnelName, ...token } });
+  } catch (error) {
+    next(error);
+  }
+});
+
+router.post('/api/setup/cloudflare/create', async (req, res, next) => {
+  try {
+    const { tunnelName } = req.body;
+    if (!tunnelName) {
+      return res.status(400).json({ error: 'Tunnel name is required.' });
+    }
+    if (!hasCertificate()) {
+      return res.status(400).json({ error: 'Cloudflare certificate not found. Please login first.' });
+    }
+    const tunnel = await createTunnel(tunnelName);
+    
+    // Save tunnel configuration
+    const config = loadConfig();
+    saveConfigSection('cloudflare', {
+      ...config.cloudflare,
+      tunnelName: tunnel.name || tunnelName,
+      credentialFile: tunnel.credentialFile || '',
+      accountTag: tunnel.AccountTag || '',
+      certPem: tunnel.certPem || ''
+    });
+
+    res.json({ success: true, tunnel });
   } catch (error) {
     next(error);
   }

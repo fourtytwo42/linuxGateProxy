@@ -122,3 +122,160 @@ export function hasCertificate() {
   return fs.existsSync(DEFAULT_CERT_PATH);
 }
 
+export function listTunnels() {
+  return new Promise((resolve, reject) => {
+    if (!commandExists('cloudflared')) {
+      reject(new Error('cloudflared binary is not installed.'));
+      return;
+    }
+
+    if (!hasCertificate()) {
+      reject(new Error('Cloudflare certificate not found. Please login first.'));
+      return;
+    }
+
+    const proc = spawn('cloudflared', ['tunnel', 'list', '--output', 'json'], {
+      env: { ...process.env, NO_COLOR: '1' }
+    });
+
+    let stdout = '';
+    let stderr = '';
+
+    proc.stdout.on('data', (data) => {
+      stdout += data.toString();
+    });
+
+    proc.stderr.on('data', (data) => {
+      stderr += data.toString();
+    });
+
+    proc.on('error', (error) => {
+      reject(new Error(`Failed to list tunnels: ${error.message}`));
+    });
+
+    proc.on('exit', (code) => {
+      if (code !== 0) {
+        reject(new Error(`cloudflared tunnel list failed: ${stderr || 'Unknown error'}`));
+        return;
+      }
+
+      try {
+        const tunnels = JSON.parse(stdout);
+        resolve(tunnels);
+      } catch (error) {
+        reject(new Error(`Failed to parse tunnel list: ${error.message}`));
+      }
+    });
+  });
+}
+
+export function getTunnelToken(tunnelName) {
+  return new Promise((resolve, reject) => {
+    if (!commandExists('cloudflared')) {
+      reject(new Error('cloudflared binary is not installed.'));
+      return;
+    }
+
+    if (!hasCertificate()) {
+      reject(new Error('Cloudflare certificate not found. Please login first.'));
+      return;
+    }
+
+    if (!tunnelName) {
+      reject(new Error('Tunnel name or UUID is required.'));
+      return;
+    }
+
+    const proc = spawn('cloudflared', ['tunnel', 'token', tunnelName], {
+      env: { ...process.env, NO_COLOR: '1' }
+    });
+
+    let stdout = '';
+    let stderr = '';
+
+    proc.stdout.on('data', (data) => {
+      stdout += data.toString();
+    });
+
+    proc.stderr.on('data', (data) => {
+      stderr += data.toString();
+    });
+
+    proc.on('error', (error) => {
+      reject(new Error(`Failed to get tunnel token: ${error.message}`));
+    });
+
+    proc.on('exit', (code) => {
+      if (code !== 0) {
+        reject(new Error(`cloudflared tunnel token failed: ${stderr || 'Unknown error'}`));
+        return;
+      }
+
+      // The token is output as a JSON credential file content
+      try {
+        const tokenData = JSON.parse(stdout.trim());
+        resolve(tokenData);
+      } catch (error) {
+        // If not JSON, it might be just the token string or credentials file path
+        resolve({ credentials: stdout.trim() });
+      }
+    });
+  });
+}
+
+export function createTunnel(tunnelName) {
+  return new Promise((resolve, reject) => {
+    if (!commandExists('cloudflared')) {
+      reject(new Error('cloudflared binary is not installed.'));
+      return;
+    }
+
+    if (!hasCertificate()) {
+      reject(new Error('Cloudflare certificate not found. Please login first.'));
+      return;
+    }
+
+    if (!tunnelName) {
+      reject(new Error('Tunnel name is required.'));
+      return;
+    }
+
+    const proc = spawn('cloudflared', ['tunnel', 'create', tunnelName, '--output', 'json'], {
+      env: { ...process.env, NO_COLOR: '1' }
+    });
+
+    let stdout = '';
+    let stderr = '';
+
+    proc.stdout.on('data', (data) => {
+      stdout += data.toString();
+    });
+
+    proc.stderr.on('data', (data) => {
+      stderr += data.toString();
+    });
+
+    proc.on('error', (error) => {
+      reject(new Error(`Failed to create tunnel: ${error.message}`));
+    });
+
+    proc.on('exit', (code) => {
+      if (code !== 0) {
+        reject(new Error(`cloudflared tunnel create failed: ${stderr || 'Unknown error'}`));
+        return;
+      }
+
+      try {
+        const tunnel = JSON.parse(stdout);
+        resolve(tunnel);
+      } catch (error) {
+        // If JSON parsing fails, the tunnel might have been created anyway
+        // Try to get the token for it
+        getTunnelToken(tunnelName)
+          .then((token) => resolve({ name: tunnelName, credentials: token }))
+          .catch(() => resolve({ name: tunnelName }));
+      }
+    });
+  });
+}
+
