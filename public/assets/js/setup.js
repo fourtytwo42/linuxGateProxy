@@ -4,6 +4,10 @@ const alertBox = document.getElementById('alert');
 const summaryBox = document.getElementById('summary');
 const cloudflareStatus = document.getElementById('cloudflare-status');
 
+const ldapForm = document.getElementById('step-1');
+const siteForm = document.getElementById('step-2');
+const sambaForm = document.getElementById('step-3');
+
 let currentStep = 1;
 const setupState = {
   ldap: null,
@@ -84,6 +88,16 @@ async function postJson(url, payload) {
   return response.json();
 }
 
+async function getJson(url) {
+  const response = await fetch(url, {
+    headers: { Accept: 'application/json' }
+  });
+  if (!response.ok) {
+    throw new Error(`Request failed (${response.status})`);
+  }
+  return response.json();
+}
+
 function prepareSummary() {
   summaryBox.innerHTML = `
     <article class="message is-primary">
@@ -126,7 +140,7 @@ document.querySelectorAll('button[data-action="prev"]').forEach((button) => {
 });
 
 // Step 1 - LDAP
-document.getElementById('step-1').addEventListener('submit', async (event) => {
+ldapForm.addEventListener('submit', async (event) => {
   event.preventDefault();
   clearAlert();
   const form = event.target;
@@ -149,7 +163,7 @@ document.getElementById('step-1').addEventListener('submit', async (event) => {
 });
 
 // Step 2 - Site
-document.getElementById('step-2').addEventListener('submit', async (event) => {
+siteForm.addEventListener('submit', async (event) => {
   event.preventDefault();
   clearAlert();
   const form = event.target;
@@ -158,17 +172,29 @@ document.getElementById('step-2').addEventListener('submit', async (event) => {
   payload.enableWebAuthn = !!payload.enableWebAuthn;
 
   try {
-    await postJson('/api/setup/site', payload);
-    setupState.site = payload;
+    const sitePayload = {
+      listenAddress: payload.listenAddress,
+      listenPort: payload.listenPort,
+      publicBaseUrl: payload.publicBaseUrl,
+      sessionHours: payload.sessionHours,
+      enableOtp: payload.enableOtp,
+      enableWebAuthn: payload.enableWebAuthn
+    };
 
-    await postJson('/admin/api/settings/smtp', {
+    await postJson('/api/setup/site', sitePayload);
+    setupState.site = sitePayload;
+
+    const smtpPayload = {
       host: payload.smtpHost,
-      port: Number(payload.smtpPort) || 587,
+      port: payload.smtpPort,
       secure: !!payload.smtpSecure,
       username: payload.smtpUsername,
       password: payload.smtpPassword,
-      fromAddress: payload.smtpFrom
-    });
+      fromAddress: payload.smtpFrom,
+      replyTo: payload.smtpReplyTo
+    };
+
+    await postJson('/api/setup/smtp', smtpPayload);
 
     showStep(3);
   } catch (error) {
@@ -177,7 +203,7 @@ document.getElementById('step-2').addEventListener('submit', async (event) => {
 });
 
 // Step 3 - Samba
-document.getElementById('step-3').addEventListener('submit', async (event) => {
+sambaForm.addEventListener('submit', async (event) => {
   event.preventDefault();
   const payload = serializeForm(event.target);
   payload.guestOk = !!payload.guestOk;
@@ -294,5 +320,59 @@ document.getElementById('finish-setup').addEventListener('click', async () => {
   }
 });
 
-showStep(1);
+async function populateForms() {
+  try {
+    const status = await getJson('/api/setup/status');
+
+    if (status.auth) {
+      ldapForm.domain.value = status.auth.domain || '';
+      ldapForm.ldapHost.value = status.auth.ldapHost || '';
+      ldapForm.ldapPort.value = status.auth.ldapPort || 636;
+      ldapForm.baseDn.value = status.auth.baseDn || '';
+      ldapForm.lookupUser.value = status.auth.lookupUser || '';
+      ldapForm.sessionAttribute.value = status.auth.sessionAttribute || 'gateProxySession';
+      ldapForm.webAuthnAttribute.value = status.auth.webAuthnAttribute || 'gateProxyWebAuthn';
+      ldapForm.allowedGroupDns.value = (status.auth.allowedGroupDns || []).join('\n');
+      ldapForm.adminGroupDns.value = (status.auth.adminGroupDns || []).join('\n');
+    }
+
+    if (status.site) {
+      siteForm.listenAddress.value = status.site.listenAddress || '127.0.0.1';
+      siteForm.listenPort.value = status.site.listenPort || 5000;
+      siteForm.publicBaseUrl.value = status.site.publicBaseUrl || '';
+      siteForm.sessionHours.value = status.site.sessionHours || 8;
+      siteForm.enableOtp.checked = Boolean(status.site.enableOtp);
+      siteForm.enableWebAuthn.checked = Boolean(status.site.enableWebAuthn);
+    }
+
+    if (status.smtp) {
+      siteForm.smtpHost.value = status.smtp.host || '';
+      siteForm.smtpPort.value = status.smtp.port || 587;
+      siteForm.smtpSecure.checked = Boolean(status.smtp.secure);
+      siteForm.smtpUsername.value = status.smtp.username || '';
+      siteForm.smtpFrom.value = status.smtp.fromAddress || '';
+      if (siteForm.smtpReplyTo) {
+        siteForm.smtpReplyTo.value = status.smtp.replyTo || '';
+      }
+    }
+
+    if (status.samba) {
+      sambaForm.shareName.value = status.samba.shareName || 'GateProxySetup';
+      sambaForm.guestOk.checked = Boolean(status.samba.guestOk);
+    }
+
+    if (status.resources?.length) {
+      status.resources.forEach((resource) => addResourceRow(resource));
+    }
+  } catch (error) {
+    console.warn('Failed to load setup status', error);
+  }
+}
+
+async function initialize() {
+  await populateForms();
+  showStep(1);
+}
+
+initialize();
 

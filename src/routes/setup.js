@@ -9,6 +9,7 @@ import {
 import { testServiceBind, setBindPassword } from '../services/ldapService.js';
 import { startLogin as startCloudflareLogin } from '../services/cloudflareService.js';
 import { sambaManager } from '../services/sambaService.js';
+import { storeSmtpPassword } from '../services/otpService.js';
 
 const router = Router();
 const cloudflareSessions = new Map();
@@ -29,6 +30,7 @@ router.get('/api/setup/status', (req, res) => {
       allowedGroupDns: config.auth.allowedGroupDns
     },
     cloudflareConfigured: Boolean(config.cloudflare.certPem),
+    smtp: config.smtp,
     resources: listResources()
   });
 });
@@ -102,6 +104,39 @@ router.post('/api/setup/site', (req, res) => {
     enableOtp,
     enableWebAuthn
   });
+
+  res.json({ success: true });
+});
+
+router.post('/api/setup/smtp', (req, res) => {
+  const config = loadConfig();
+  const {
+    host = '',
+    port = 587,
+    secure = false,
+    username = '',
+    password = '',
+    fromAddress = '',
+    replyTo = ''
+  } = req.body;
+
+  const secureFlag = typeof secure === 'string'
+    ? ['true', '1', 'on', 'yes'].includes(secure.toLowerCase())
+    : Boolean(secure);
+
+  saveConfigSection('smtp', {
+    ...config.smtp,
+    host,
+    port: Number(port) || 587,
+    secure: secureFlag,
+    username,
+    fromAddress,
+    replyTo
+  });
+
+  if (password) {
+    storeSmtpPassword(password);
+  }
 
   res.json({ success: true });
 });

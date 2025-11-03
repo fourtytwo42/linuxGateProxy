@@ -1,5 +1,6 @@
 import http from 'http';
 import path from 'path';
+import os from 'os';
 import express from 'express';
 import helmet from 'helmet';
 import cookieParser from 'cookie-parser';
@@ -19,6 +20,34 @@ import { logger } from './utils/logger.js';
 
 function bootstrapDirectories() {
   [dataDir, runtimeDir, tempDir, shareDir].forEach((dir) => ensureDirSync(dir));
+}
+
+function resolveListenEndpoint(config) {
+  const fallback = { address: '127.0.0.1', port: 5000 };
+  if (!config?.site) {
+    return fallback;
+  }
+
+  const port = Number(config.site.listenPort) || fallback.port;
+  let address = config.site.listenAddress || fallback.address;
+
+  if (address !== '0.0.0.0' && address !== '127.0.0.1' && address !== '::' && address !== '::0') {
+    const interfaces = os.networkInterfaces();
+    const allAddresses = new Set();
+    Object.values(interfaces).forEach((entries) => {
+      entries
+        ?.filter((entry) => !entry.internal)
+        .forEach((entry) => {
+          allAddresses.add(entry.address);
+        });
+    });
+    if (!allAddresses.has(address)) {
+      logger.warn('Configured listen address not found on host, falling back to loopback', { address });
+      address = fallback.address;
+    }
+  }
+
+  return { address, port };
 }
 
 async function startServer() {
@@ -99,11 +128,35 @@ async function startServer() {
     upgradeProxy(req, socket, head);
   });
 
-  const listenAddress = config.site.listenAddress || '127.0.0.1';
-  const listenPort = config.site.listenPort || 5000;
+  const endpoint = resolveListenEndpoint(config);
 
-  server.listen(listenPort, listenAddress, () => {
-    logger.info('Server listening', { listenAddress, listenPort });
+  let hasRetried = false;
+
+  server.listen(endpoint.port, endpoint.address, () => {
+    logger.info('Server listening', { listenAddress: endpoint.address, listenPort: endpoint.port });
+  });
+
+  server.on('error', (error) => {
+    if (error.code === 'EADDRNOTAVAIL' || error.code === 'EADDRINUSE') {
+      const fallback = { address: '127.0.0.1', port: 5000 };
+      if (!hasRetried && (endpoint.address !== fallback.address || endpoint.port !== fallback.port)) {
+        hasRetried = true;
+        logger.warn('Listen endpoint unavailable, retrying with fallback loopback:5000', { error: error.code });
+        const relaunch = () => {
+          server.listen(fallback.port, fallback.address, () => {
+            logger.info('Server listening on fallback endpoint', fallback);
+          });
+        };
+        if (server.listening) {
+          server.close(relaunch);
+        } else {
+          relaunch();
+        }
+        return;
+      }
+    }
+    logger.error('Server error', { error: error.message });
+    process.exit(1);
   });
 
   process.on('SIGINT', () => {
