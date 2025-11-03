@@ -93,6 +93,16 @@ export class ConfigStore {
   }
 
   upsertResource(resource) {
+    // Normalize resource object to ensure all required fields are present
+    const normalized = {
+      id: resource.id,
+      name: resource.name || '',
+      description: resource.description || '',
+      target_url: resource.target_url || resource.targetUrl || '',
+      icon: resource.icon || '',
+      required_group: resource.required_group || resource.requiredGroup || resource.groupDn || null
+    };
+
     const stmt = this.db.prepare(`
       INSERT INTO resources (id, name, description, target_url, icon, required_group, created_at, updated_at)
       VALUES (@id, @name, @description, @target_url, @icon, @required_group, datetime('now'), datetime('now'))
@@ -104,7 +114,7 @@ export class ConfigStore {
         required_group = excluded.required_group,
         updated_at = datetime('now')
     `);
-    stmt.run(resource);
+    stmt.run(normalized);
   }
 
   deleteResource(id) {
