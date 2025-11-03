@@ -277,7 +277,23 @@ export function userHasGroup(userEntry, groupDns) {
   const normalizedMemberships = (Array.isArray(memberships) ? memberships : [memberships])
     .map((dn) => String(dn).toLowerCase());
   const normalizedGroups = groupDns.map((dn) => dn.toLowerCase());
-  return normalizedMemberships.some((dn) => normalizedGroups.includes(dn));
+  
+  // Also extract CN names from DNs for matching
+  const membershipCNs = normalizedMemberships.map((dn) => {
+    // Extract CN from DN, e.g., "cn=domain admins,cn=users,dc=example,dc=com" -> "domain admins"
+    const cnMatch = dn.match(/^cn=([^,]+)/i);
+    return cnMatch ? cnMatch[1] : null;
+  }).filter(Boolean);
+  
+  return normalizedMemberships.some((dn) => normalizedGroups.includes(dn)) ||
+         membershipCNs.some((cn) => normalizedGroups.includes(cn)) ||
+         // Also check if any configured group matches any membership DN or CN
+         normalizedGroups.some((group) => {
+           // If group is a full DN, check direct match
+           if (normalizedMemberships.includes(group)) return true;
+           // If group is a short name, check if it matches any CN
+           return membershipCNs.includes(group);
+         });
 }
 
 export async function updateUserAttribute(userDn, attribute, value) {
