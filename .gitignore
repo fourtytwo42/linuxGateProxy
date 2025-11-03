@@ -112,3 +112,6 @@ dist
 
 # Bun install cache
 .bun
+
+# Runtime data
+data/

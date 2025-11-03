@@ -1,4 +1,22 @@
-import { Client, Attribute, Change, escapeFilterValue } from 'ldapts';
+import { Client, Attribute, Change } from 'ldapts';
+function escapeFilterValue(value) {
+  return value.replace(/([\\()*\0])/g, (match) => {
+    switch (match) {
+      case '\\':
+        return '\\5c';
+      case '*':
+        return '\\2a';
+      case '(':
+        return '\\28';
+      case ')':
+        return '\\29';
+      case '\0':
+        return '\\00';
+      default:
+        return match;
+    }
+  });
+}
 import tls from 'tls';
 import { loadConfig, getSecret, setSecret } from '../config/index.js';
 import { logger } from '../utils/logger.js';
