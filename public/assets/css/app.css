@@ -1,0 +1,40 @@
+body {
+  min-height: 100vh;
+}
+
+.setup-step {
+  display: none;
+}
+
+.setup-step.is-active {
+  display: block;
+}
+
+.steps .step-item.is-completed .step-marker {
+  background-color: #48c78e;
+  color: #fff;
+}
+
+.notification.is-hidden {
+  display: none;
+}
+
+.admin-view {
+  display: none;
+}
+
+.admin-view.is-active {
+  display: block;
+}
+
+.resource-card {
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+}
+
+.resource-card .button {
+  margin-top: 1rem;
+}
+

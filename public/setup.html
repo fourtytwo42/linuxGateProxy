@@ -1,0 +1,292 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta http-equiv="X-UA-Compatible" content="IE=edge" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Linux Gate Proxy Setup</title>
+    <link rel="stylesheet" href="/assets/css/bulma.min.css" />
+    <link rel="stylesheet" href="/assets/css/app.css" />
+  </head>
+  <body class="has-background-light">
+    <section class="section">
+      <div class="container">
+        <div class="box">
+          <h1 class="title">Linux Gate Proxy Setup</h1>
+          <p class="subtitle">Guided configuration wizard</p>
+          <div id="setup-progress" class="steps has-content-centered">
+            <div class="step-item is-active" data-step="1">
+              <div class="step-marker">1</div>
+              <div class="step-details">
+                <p class="step-title">Active Directory</p>
+              </div>
+            </div>
+            <div class="step-item" data-step="2">
+              <div class="step-marker">2</div>
+              <div class="step-details">
+                <p class="step-title">Site</p>
+              </div>
+            </div>
+            <div class="step-item" data-step="3">
+              <div class="step-marker">3</div>
+              <div class="step-details">
+                <p class="step-title">Samba Share</p>
+              </div>
+            </div>
+            <div class="step-item" data-step="4">
+              <div class="step-marker">4</div>
+              <div class="step-details">
+                <p class="step-title">Cloudflare</p>
+              </div>
+            </div>
+            <div class="step-item" data-step="5">
+              <div class="step-marker">5</div>
+              <div class="step-details">
+                <p class="step-title">Resources</p>
+              </div>
+            </div>
+            <div class="step-item" data-step="6">
+              <div class="step-marker">6</div>
+              <div class="step-details">
+                <p class="step-title">Finish</p>
+              </div>
+            </div>
+          </div>
+
+          <div id="alert" class="notification is-hidden"></div>
+
+          <div id="step-contents">
+            <form id="step-1" class="setup-step is-active">
+              <h2 class="title is-4">Active Directory Connection</h2>
+              <div class="columns">
+                <div class="column">
+                  <div class="field">
+                    <label class="label">Domain FQDN</label>
+                    <div class="control has-icons-left">
+                      <input class="input" name="domain" required placeholder="example.corp" />
+                      <span class="icon is-small is-left">
+                        <i class="fas fa-globe"></i>
+                      </span>
+                    </div>
+                  </div>
+                  <div class="field">
+                    <label class="label">LDAP Host</label>
+                    <input class="input" name="ldapHost" required placeholder="dc01.example.corp" />
+                  </div>
+                  <div class="field">
+                    <label class="label">Base DN</label>
+                    <input class="input" name="baseDn" required placeholder="DC=example,DC=corp" />
+                  </div>
+                  <div class="field">
+                    <label class="label">Service Account (UPN)</label>
+                    <input class="input" name="lookupUser" required placeholder="gateproxy@example.corp" />
+                  </div>
+                  <div class="field">
+                    <label class="label">Service Account Password</label>
+                    <input class="input" name="password" type="password" required />
+                  </div>
+                </div>
+                <div class="column">
+                  <div class="field">
+                    <label class="label">LDAP Port</label>
+                    <input class="input" name="ldapPort" type="number" value="636" />
+                  </div>
+                  <div class="field">
+                    <label class="checkbox">
+                      <input type="checkbox" name="useLdaps" checked />
+                      Use LDAPS (recommended)
+                    </label>
+                  </div>
+                  <div class="field">
+                    <label class="label">Session Attribute</label>
+                    <input class="input" name="sessionAttribute" value="gateProxySession" />
+                  </div>
+                  <div class="field">
+                    <label class="label">WebAuthn Attribute</label>
+                    <input class="input" name="webAuthnAttribute" value="gateProxyWebAuthn" />
+                  </div>
+                  <div class="field">
+                    <label class="label">Allowed Group DNs</label>
+                    <textarea class="textarea" name="allowedGroupDns" placeholder="One DN per line"></textarea>
+                  </div>
+                  <div class="field">
+                    <label class="label">Admin Group DNs</label>
+                    <textarea class="textarea" name="adminGroupDns" placeholder="One DN per line"></textarea>
+                  </div>
+                </div>
+              </div>
+              <div class="field is-grouped is-justify-content-flex-end">
+                <div class="control">
+                  <button class="button is-link" type="submit">Test &amp; Continue</button>
+                </div>
+              </div>
+            </form>
+
+            <form id="step-2" class="setup-step">
+              <h2 class="title is-4">Site Configuration</h2>
+              <div class="columns">
+                <div class="column">
+                  <div class="field">
+                    <label class="label">Listen Address</label>
+                    <input class="input" name="listenAddress" value="127.0.0.1" />
+                  </div>
+                  <div class="field">
+                    <label class="label">Listen Port</label>
+                    <input class="input" name="listenPort" type="number" value="5000" />
+                  </div>
+                  <div class="field">
+                    <label class="label">Public Base URL</label>
+                    <input class="input" name="publicBaseUrl" placeholder="https://portal.example.com" />
+                  </div>
+                  <div class="field">
+                    <label class="label">Session Duration (hours)</label>
+                    <input class="input" name="sessionHours" type="number" value="8" />
+                  </div>
+                </div>
+                <div class="column">
+                  <div class="field">
+                    <label class="checkbox">
+                      <input type="checkbox" name="enableOtp" checked />
+                      Enable OTP fallback
+                    </label>
+                  </div>
+                  <div class="field">
+                    <label class="checkbox">
+                      <input type="checkbox" name="enableWebAuthn" checked />
+                      Enforce WebAuthn second factor
+                    </label>
+                  </div>
+                  <div class="box has-background-light">
+                    <p class="has-text-weight-semibold">SMTP Settings</p>
+                    <div class="field">
+                      <label class="label">SMTP Host</label>
+                      <input class="input" name="smtpHost" />
+                    </div>
+                    <div class="field">
+                      <label class="label">SMTP Port</label>
+                      <input class="input" name="smtpPort" type="number" value="587" />
+                    </div>
+                    <div class="field">
+                      <label class="checkbox">
+                        <input type="checkbox" name="smtpSecure" />
+                        Use TLS
+                      </label>
+                    </div>
+                    <div class="field">
+                      <label class="label">SMTP Username</label>
+                      <input class="input" name="smtpUsername" />
+                    </div>
+                    <div class="field">
+                      <label class="label">SMTP Password</label>
+                      <input class="input" name="smtpPassword" type="password" />
+                    </div>
+                    <div class="field">
+                      <label class="label">From Address</label>
+                      <input class="input" name="smtpFrom" />
+                    </div>
+                  </div>
+                </div>
+              </div>
+              <div class="field is-grouped">
+                <div class="control">
+                  <button class="button" data-action="prev">Back</button>
+                </div>
+                <div class="control">
+                  <button class="button is-link" type="submit">Save &amp; Continue</button>
+                </div>
+              </div>
+            </form>
+
+            <form id="step-3" class="setup-step">
+              <h2 class="title is-4">Samba Share</h2>
+              <p class="mb-4">A temporary share is created while the appliance is running to host helper scripts. Provide the name users should map during setup.</p>
+              <div class="columns">
+                <div class="column">
+                  <div class="field">
+                    <label class="label">Share Name</label>
+                    <input class="input" name="shareName" value="GateProxySetup" />
+                  </div>
+                  <div class="field">
+                    <label class="checkbox">
+                      <input type="checkbox" name="guestOk" />
+                      Allow guest access (not recommended)
+                    </label>
+                  </div>
+                </div>
+                <div class="column">
+                  <article class="message is-info">
+                    <div class="message-header">
+                      <p>Samba Share Guidance</p>
+                    </div>
+                    <div class="message-body">
+                      Map the share as <code>\\\&lt;host&gt;\GateProxySetup</code> from your domain controller and certificate server. The server will automatically unpublish the share when Gate Proxy stops.
+                    </div>
+                  </article>
+                </div>
+              </div>
+              <div class="field is-grouped">
+                <div class="control">
+                  <button class="button" data-action="prev">Back</button>
+                </div>
+                <div class="control">
+                  <button class="button is-link" type="submit">Enable Share</button>
+                </div>
+              </div>
+            </form>
+
+            <div id="step-4" class="setup-step">
+              <h2 class="title is-4">Cloudflare Device Login</h2>
+              <p>Cloudflare will issue a login code similar to the CLI workflow. Use the generated link to authenticate.</p>
+              <div id="cloudflare-login" class="box">
+                <button class="button is-link" id="cloudflare-start">Generate Login Link</button>
+                <div id="cloudflare-status" class="mt-4"></div>
+              </div>
+              <div class="field is-grouped">
+                <div class="control">
+                  <button class="button" data-action="prev">Back</button>
+                </div>
+                <div class="control">
+                  <button class="button is-link" id="cloudflare-next">Continue</button>
+                </div>
+              </div>
+            </div>
+
+            <form id="step-5" class="setup-step">
+              <h2 class="title is-4">Protected Resources</h2>
+              <p>Add internal services that should be exposed after authentication. Configure at least one destination.</p>
+              <div class="field">
+                <label class="label">Primary Target URL</label>
+                <input class="input" name="targetHost" placeholder="http://127.0.0.1:5600" required />
+              </div>
+              <div id="resource-list"></div>
+              <div class="buttons mt-3">
+                <button class="button is-small" type="button" id="add-resource">Add Resource</button>
+              </div>
+              <div class="field is-grouped">
+                <div class="control">
+                  <button class="button" data-action="prev">Back</button>
+                </div>
+                <div class="control">
+                  <button class="button is-link" type="submit">Save Resources</button>
+                </div>
+              </div>
+            </form>
+
+            <div id="step-6" class="setup-step">
+              <h2 class="title is-4">Setup Complete</h2>
+              <p>Review the summary and launch the appliance.</p>
+              <div id="summary"></div>
+              <div class="buttons is-right mt-4">
+                <button class="button is-success" id="finish-setup">Complete Setup</button>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <script src="https://kit.fontawesome.com/a2e0e9b1ef.js" crossorigin="anonymous"></script>
+    <script type="module" src="/assets/js/setup.js"></script>
+  </body>
+</html>
+

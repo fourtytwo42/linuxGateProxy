@@ -1,0 +1,63 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta http-equiv="X-UA-Compatible" content="IE=edge" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Linux Gate Proxy Login</title>
+    <link rel="stylesheet" href="/assets/css/bulma.min.css" />
+    <link rel="stylesheet" href="/assets/css/app.css" />
+  </head>
+  <body class="has-background-light">
+    <section class="section is-fullheight-with-navbar">
+      <div class="container">
+        <div class="columns is-centered">
+          <div class="column is-5">
+            <div class="box">
+              <h1 class="title has-text-centered">Linux Gate Proxy</h1>
+              <div id="login-alert" class="notification is-hidden"></div>
+              <form id="login-form">
+                <div class="field">
+                  <label class="label">Username</label>
+                  <div class="control has-icons-left">
+                    <input class="input" name="username" required autocomplete="username" />
+                    <span class="icon is-small is-left"><i class="fas fa-user"></i></span>
+                  </div>
+                </div>
+                <div class="field">
+                  <label class="label">Password</label>
+                  <div class="control has-icons-left">
+                    <input class="input" name="password" type="password" required autocomplete="current-password" />
+                    <span class="icon is-small is-left"><i class="fas fa-lock"></i></span>
+                  </div>
+                </div>
+                <div class="field">
+                  <button class="button is-link is-fullwidth" type="submit">Sign in</button>
+                </div>
+              </form>
+
+              <div id="otp-form" class="is-hidden">
+                <p class="mb-3">Enter the verification code sent to your directory email.</p>
+                <div class="field">
+                  <label class="label">Verification Code</label>
+                  <input class="input" id="otp-code" />
+                </div>
+                <div class="field">
+                  <button class="button is-link is-fullwidth" id="otp-submit">Verify</button>
+                </div>
+              </div>
+
+              <div id="webauthn-progress" class="is-hidden">
+                <p class="has-text-centered">Follow the prompt in your browser or authenticator.</p>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <script src="https://kit.fontawesome.com/a2e0e9b1ef.js" crossorigin="anonymous"></script>
+    <script type="module" src="/assets/js/login.js"></script>
+  </body>
+</html>
+

@@ -1,0 +1,186 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta http-equiv="X-UA-Compatible" content="IE=edge" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Gate Proxy Administration</title>
+    <link rel="stylesheet" href="/assets/css/bulma.min.css" />
+    <link rel="stylesheet" href="/assets/css/app.css" />
+  </head>
+  <body>
+    <section class="section">
+      <div class="container">
+        <div class="columns">
+          <div class="column is-3">
+            <aside class="menu">
+              <p class="menu-label">General</p>
+              <ul class="menu-list">
+                <li><a class="is-active" data-view="dashboard">Dashboard</a></li>
+                <li><a data-view="settings">Settings</a></li>
+              </ul>
+              <p class="menu-label">Access</p>
+              <ul class="menu-list">
+                <li><a data-view="resources">Resources</a></li>
+                <li><a data-view="users">Users</a></li>
+              </ul>
+            </aside>
+          </div>
+          <div class="column is-9">
+            <div id="alert" class="notification is-hidden"></div>
+
+            <div id="view-dashboard" class="admin-view is-active">
+              <div class="box">
+                <h1 class="title">Appliance Status</h1>
+                <p class="subtitle">Review high-level configuration.</p>
+                <div id="status-cards" class="columns is-multiline"></div>
+              </div>
+            </div>
+
+            <div id="view-settings" class="admin-view">
+              <div class="box">
+                <h2 class="title is-4">Configuration</h2>
+                <form id="settings-form">
+                  <h3 class="title is-5">Site</h3>
+                  <div class="columns">
+                    <div class="column">
+                      <div class="field">
+                        <label class="label">Public Base URL</label>
+                        <input class="input" name="publicBaseUrl" />
+                      </div>
+                      <div class="field">
+                        <label class="label">Session Hours</label>
+                        <input class="input" name="sessionHours" type="number" />
+                      </div>
+                    </div>
+                    <div class="column">
+                      <div class="field">
+                        <label class="checkbox">
+                          <input type="checkbox" name="enableOtp" />
+                          Enable OTP
+                        </label>
+                      </div>
+                      <div class="field">
+                        <label class="checkbox">
+                          <input type="checkbox" name="enableWebAuthn" />
+                          Require WebAuthn
+                        </label>
+                      </div>
+                    </div>
+                  </div>
+                  <h3 class="title is-5">Directory Groups</h3>
+                  <div class="columns">
+                    <div class="column">
+                      <div class="field">
+                        <label class="label">Allowed Group DNs</label>
+                        <textarea class="textarea" name="allowedGroupDns"></textarea>
+                      </div>
+                    </div>
+                    <div class="column">
+                      <div class="field">
+                        <label class="label">Admin Group DNs</label>
+                        <textarea class="textarea" name="adminGroupDns"></textarea>
+                      </div>
+                    </div>
+                  </div>
+                  <div class="field is-grouped is-justify-content-flex-end">
+                    <div class="control">
+                      <button class="button is-link" type="submit">Save Settings</button>
+                    </div>
+                  </div>
+                </form>
+              </div>
+            </div>
+
+            <div id="view-resources" class="admin-view">
+              <div class="box">
+                <div class="level">
+                  <div class="level-left">
+                    <h2 class="title is-4">Protected Resources</h2>
+                  </div>
+                  <div class="level-right">
+                    <button class="button is-link" id="resource-add">Add Resource</button>
+                  </div>
+                </div>
+                <table class="table is-fullwidth" id="resource-table">
+                  <thead>
+                    <tr>
+                      <th>Name</th>
+                      <th>Target</th>
+                      <th>Group</th>
+                      <th></th>
+                    </tr>
+                  </thead>
+                  <tbody></tbody>
+                </table>
+              </div>
+            </div>
+
+            <div id="view-users" class="admin-view">
+              <div class="box">
+                <div class="level">
+                  <div class="level-left">
+                    <h2 class="title is-4">Directory Users</h2>
+                  </div>
+                  <div class="level-right">
+                    <div class="field has-addons">
+                      <div class="control">
+                        <input class="input" id="user-query" placeholder="Search by name or SAM" />
+                      </div>
+                      <div class="control">
+                        <button class="button is-link" id="user-search">Search</button>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+                <table class="table is-fullwidth" id="user-table">
+                  <thead>
+                    <tr>
+                      <th>Name</th>
+                      <th>SAM</th>
+                      <th>Email</th>
+                      <th>Status</th>
+                      <th></th>
+                    </tr>
+                  </thead>
+                  <tbody></tbody>
+                </table>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <div class="modal" id="user-modal">
+      <div class="modal-background"></div>
+      <div class="modal-card">
+        <header class="modal-card-head">
+          <p class="modal-card-title" id="user-modal-title">User</p>
+          <button class="delete" aria-label="close"></button>
+        </header>
+        <section class="modal-card-body">
+          <form id="user-form">
+            <div class="field">
+              <label class="label">Email</label>
+              <input class="input" name="mail" />
+            </div>
+            <div class="field">
+              <label class="label">Phone</label>
+              <input class="input" name="telephoneNumber" />
+            </div>
+          </form>
+        </section>
+        <footer class="modal-card-foot">
+          <button class="button is-link" id="user-save">Save</button>
+          <button class="button is-warning" id="user-reset-webauthn">Clear WebAuthn</button>
+          <button class="button is-warning" id="user-unlock">Unlock</button>
+          <button class="button is-danger" id="user-disable">Disable</button>
+        </footer>
+      </div>
+    </div>
+
+    <script type="module" src="/assets/js/admin.js"></script>
+  </body>
+</html>
+
