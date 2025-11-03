@@ -17,6 +17,11 @@ router.get('/api/setup/status', (req, res) => {
   const config = loadConfig();
   res.json({
     completed: config.setup.completed,
+    prerequisites: {
+      samba: commandExists('smbd'),
+      cloudflared: commandExists('cloudflared'),
+      installScript: 'scripts/install-prereqs.sh'
+    },
     site: config.site,
     auth: {
       domain: config.auth.domain,
