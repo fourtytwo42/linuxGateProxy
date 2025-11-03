@@ -34,7 +34,7 @@ export function setBindPassword(password) {
   setSecret('auth.lookupPassword', password);
 }
 
-function createClient(config, { rejectUnauthorized = true } = {}) {
+function createClient(config, { rejectUnauthorized = false } = {}) {
   if (!config.setup.completed) {
     throw new Error('Directory services not configured');
   }
@@ -214,7 +214,7 @@ function normalizeIdentifier(identifier) {
   return { type: 'samAccountName', value: trimmed };
 }
 
-async function withServiceClient(fn, { rejectUnauthorized = true } = {}) {
+async function withServiceClient(fn, { rejectUnauthorized = false } = {}) {
   const config = loadConfig();
   const client = createClient(config, { rejectUnauthorized });
   try {
