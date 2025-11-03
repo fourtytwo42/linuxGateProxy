@@ -278,8 +278,11 @@
               </div>
             </form>
             <div id="step-5" class="setup-step">
-              <h2 class="title is-4">Cloudflare Device Login</h2>
-              <p>Cloudflare will issue a login code similar to the CLI workflow. Use the generated link to authenticate.</p>
+              <h2 class="title is-4">Cloudflare Authentication</h2>
+              <p>Authenticate with Cloudflare to authorize this application to manage tunnels on your account.</p>
+              <div class="notification is-info is-light">
+                <strong>Note:</strong> When you click the login link, Cloudflare will ask you to select a zone for authorization. This is just for OAuth authorization purposes - it does <strong>not</strong> create a tunnel or affect your existing tunnels. You can select any zone you manage. After authentication, you'll be able to reuse existing tunnels or create new ones.
+              </div>
               <div id="cloudflare-login" class="box">
                 <button class="button is-link" id="cloudflare-start">Generate Login Link</button>
                 <div id="cloudflare-status" class="mt-4"></div>
