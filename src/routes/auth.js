@@ -53,12 +53,37 @@ function getPending(id) {
 }
 
 async function finalizeLogin(res, pending, req) {
-  const token = await ensureSession(pending.user);
-  const config = loadConfig();
-  const secure = req.secure || req.get('x-forwarded-proto') === 'https';
-  issueSessionCookie(res, config.site.cookieName, token, { secure });
-  pendingLogins.delete(pending.id);
-  return res.json({ status: 'success', redirect: pending.returnUrl });
+  logger.debug('Finalizing login', { 
+    pendingId: pending.id, 
+    username: pending.user.sAMAccountName || pending.user.userPrincipalName,
+    returnUrl: pending.returnUrl
+  });
+  try {
+    const token = await ensureSession(pending.user);
+    logger.debug('Session token created', { token: token.substring(0, 20) + '...' });
+    
+    const config = loadConfig();
+    const secure = req.secure || req.get('x-forwarded-proto') === 'https';
+    logger.debug('Setting session cookie', { 
+      cookieName: config.site.cookieName, 
+      secure 
+    });
+    
+    issueSessionCookie(res, config.site.cookieName, token, { secure });
+    pendingLogins.delete(pending.id);
+    logger.info('Login finalized successfully', { 
+      username: pending.user.sAMAccountName || pending.user.userPrincipalName,
+      returnUrl: pending.returnUrl
+    });
+    return res.json({ status: 'success', redirect: pending.returnUrl });
+  } catch (error) {
+    logger.error('Error in finalizeLogin', { 
+      error: error.message, 
+      stack: error.stack,
+      pendingId: pending.id
+    });
+    throw error;
+  }
 }
 
 router.get('/login', (req, res) => {
@@ -108,41 +133,84 @@ router.post('/api/login', loginLimiter, async (req, res, next) => {
     });
 
     const config = loadConfig();
+    logger.debug('Checking group membership', { 
+      allowedGroups: config.auth.allowedGroupDns || [],
+      userGroups: user.memberOf || []
+    });
+    
     const allowedGroups = config.auth.allowedGroupDns || [];
     if (allowedGroups.length && !userHasGroup(user, allowedGroups)) {
+      logger.warn('User denied access - not in allowed groups', { 
+        username: user.sAMAccountName || user.userPrincipalName,
+        allowedGroups
+      });
       return res.status(403).json({ error: 'Access denied' });
     }
+    logger.debug('Group membership check passed');
 
     const pending = createPending(user, { returnUrl });
+    logger.debug('Created pending login', { pendingId: pending.id });
 
     const requireWebAuthn = config.site.enableWebAuthn;
+    logger.debug('WebAuthn check', { requireWebAuthn });
+    
     const credentials = await readWebAuthnCredentials(user.distinguishedName || user.dn);
     const hasWebAuthn = credentials.length > 0;
+    logger.debug('WebAuthn credentials', { hasWebAuthn, credentialCount: credentials.length });
 
     if (requireWebAuthn && hasWebAuthn) {
-      const options = await beginAuthentication(user, req);
-      pending.stage = 'webauthn';
-      pending.credentials = credentials;
-      pending.options = options;
-      return res.json({ status: 'webauthn', pendingId: pending.id, options });
+      logger.info('Starting WebAuthn authentication', { username: user.sAMAccountName || user.userPrincipalName });
+      try {
+        const options = await beginAuthentication(user, req);
+        pending.stage = 'webauthn';
+        pending.credentials = credentials;
+        pending.options = options;
+        logger.info('WebAuthn authentication options generated', { pendingId: pending.id });
+        return res.json({ status: 'webauthn', pendingId: pending.id, options });
+      } catch (error) {
+        logger.error('WebAuthn authentication failed', { error: error.message, stack: error.stack });
+        return res.status(500).json({ error: 'WebAuthn authentication failed: ' + error.message });
+      }
     }
 
     if (requireWebAuthn && !hasWebAuthn) {
-      const options = await beginRegistration(user, req);
-      pending.stage = 'register-webauthn';
-      pending.options = options;
-      return res.json({ status: 'webauthn-register', pendingId: pending.id, options });
+      logger.info('Starting WebAuthn registration', { username: user.sAMAccountName || user.userPrincipalName });
+      try {
+        const options = await beginRegistration(user, req);
+        pending.stage = 'register-webauthn';
+        pending.options = options;
+        logger.info('WebAuthn registration options generated', { pendingId: pending.id });
+        return res.json({ status: 'webauthn-register', pendingId: pending.id, options });
+      } catch (error) {
+        logger.error('WebAuthn registration failed', { error: error.message, stack: error.stack });
+        return res.status(500).json({ error: 'WebAuthn registration failed: ' + error.message });
+      }
     }
 
+    // WebAuthn not required, check for OTP
     if (config.site.enableOtp) {
-      const challenge = await createOtpChallenge(user);
-      pending.stage = 'otp';
-      pending.otpToken = challenge.token;
-      pending.otpExpires = challenge.expires;
-      return res.json({ status: 'otp', pendingId: pending.id, expires: challenge.expires });
+      logger.info('OTP enabled, creating OTP challenge', { username: user.sAMAccountName || user.userPrincipalName });
+      try {
+        const challenge = await createOtpChallenge(user);
+        pending.stage = 'otp';
+        pending.otpToken = challenge.token;
+        pending.otpExpires = challenge.expires;
+        logger.info('OTP challenge created', { pendingId: pending.id, expires: challenge.expires });
+        return res.json({ status: 'otp', pendingId: pending.id, expires: challenge.expires });
+      } catch (error) {
+        logger.error('OTP challenge creation failed', { error: error.message, stack: error.stack });
+        return res.status(500).json({ error: 'OTP challenge failed: ' + error.message });
+      }
     }
 
-    return finalizeLogin(res, pending, req);
+    // No WebAuthn or OTP required, finalize login immediately
+    logger.info('No WebAuthn or OTP required, finalizing login', { username: user.sAMAccountName || user.userPrincipalName });
+    try {
+      return finalizeLogin(res, pending, req);
+    } catch (error) {
+      logger.error('Failed to finalize login', { error: error.message, stack: error.stack });
+      return res.status(500).json({ error: 'Login failed: ' + error.message });
+    }
   } catch (error) {
     next(error);
   }
