@@ -5,8 +5,8 @@ export const defaultSettings = {
     publicBaseUrl: '',
     sessionHours: 8,
     cookieName: 'GateAuth',
-    enableOtp: true,
-    enableWebAuthn: true,
+    enableOtp: false,
+    enableWebAuthn: false,
     landingPageEnabled: true
   },
   auth: {
@@ -24,7 +24,7 @@ export const defaultSettings = {
   },
   adminPortal: {
     enabled: true,
-    requireWebAuthn: true,
+    requireWebAuthn: false,
     allowedGroupDns: []
   },
   proxy: {

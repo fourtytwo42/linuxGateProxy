@@ -19,25 +19,29 @@ function getRp(config, req = null) {
   let rpID;
   
   if (req) {
-    // Use request origin for localhost/127.0.0.1 access
+    // Use request origin - must match what browser reports
     const protocol = req.secure || req.get('x-forwarded-proto') === 'https' ? 'https' : 'http';
     const hostHeader = req.get('host') || 'localhost:5000';
     const hostname = hostHeader.split(':')[0];
     const port = hostHeader.split(':')[1] || (req.socket?.localPort);
     
-    // Construct origin - include port for WebAuthn (browser always includes it when non-default)
+    // For localhost/127.0.0.1/IP addresses, use 'localhost' as rpID
+    // WebAuthn spec allows both localhost and 127.0.0.1 origins to work with rpID 'localhost'
+    if (hostname === 'localhost' || hostname === '127.0.0.1' || hostname.startsWith('192.168.') || hostname.startsWith('10.') || hostname.startsWith('172.')) {
+      rpID = 'localhost';
+    } else {
+      rpID = hostname;
+    }
+    
+    // Use the actual request origin (don't normalize) - browser will validate this
+    // For localhost/IP, browser allows origin with 127.0.0.1 to work with rpID 'localhost'
     if (port && port !== '80' && port !== '443') {
       origin = `${protocol}://${hostname}:${port}`;
     } else {
       origin = `${protocol}://${hostname}`;
     }
     
-    // For localhost/127.0.0.1, use 'localhost' as rpID (works for both)
-    if (hostname === 'localhost' || hostname === '127.0.0.1' || hostname.startsWith('192.168.') || hostname.startsWith('10.') || hostname.startsWith('172.')) {
-      rpID = 'localhost';
-    } else {
-      rpID = hostname;
-    }
+    logger.debug('WebAuthn RP configuration', { rpID, origin, requestHost: hostHeader, hostname });
   }
   
   // If publicBaseUrl is configured and is a real domain (not localhost), use it
@@ -78,12 +82,27 @@ function toCredentialDescriptor(credential) {
 export async function beginRegistration(user, req = null) {
   const config = loadConfig();
   const rp = getRp(config, req);
+  logger.info('Starting WebAuthn registration', { 
+    username: user.sAMAccountName || user.userPrincipalName,
+    rpID: rp.rpID,
+    origin: rp.origin
+  });
+  
   const existing = await readWebAuthnCredentials(user.distinguishedName || user.dn);
   if (existing.length > 0) {
+    logger.warn('WebAuthn credential already exists for user', { 
+      username: user.sAMAccountName || user.userPrincipalName 
+    });
     throw new Error('WebAuthn credential already registered');
   }
 
   const userHandle = crypto.randomBytes(32).toString('base64url');
+  logger.debug('Generating WebAuthn registration options', { 
+    rpID: rp.rpID,
+    origin: rp.origin,
+    userName: user.sAMAccountName
+  });
+  
   const options = generateRegistrationOptions({
     rpName: rp.rpName,
     rpID: rp.rpID,
