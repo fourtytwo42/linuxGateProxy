@@ -4,12 +4,17 @@ import path from 'path';
 import readline from 'readline';
 import { spawn } from 'child_process';
 import { setSecret } from '../config/index.js';
+import { commandExists } from '../utils/command.js';
 import { logger } from '../utils/logger.js';
 
 const DEFAULT_CERT_PATH = path.join(os.homedir(), '.cloudflared', 'cert.pem');
 
 export function startLogin() {
   return new Promise((resolve, reject) => {
+    if (!commandExists('cloudflared')) {
+      reject(new Error('cloudflared binary is not installed. Install it before continuing.'));
+      return;
+    }
     let proc;
     let lines;
     let loginUrl = null;

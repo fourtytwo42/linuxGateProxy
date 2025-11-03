@@ -14,39 +14,45 @@
         <div class="box">
           <h1 class="title">Linux Gate Proxy Setup</h1>
           <p class="subtitle">Guided configuration wizard</p>
-          <div id="setup-progress" class="steps has-content-centered">
+                    <div id="setup-progress" class="steps has-content-centered">
             <div class="step-item is-active" data-step="1">
               <div class="step-marker">1</div>
               <div class="step-details">
-                <p class="step-title">Active Directory</p>
+                <p class="step-title">Prerequisites</p>
               </div>
             </div>
             <div class="step-item" data-step="2">
               <div class="step-marker">2</div>
               <div class="step-details">
-                <p class="step-title">Site</p>
+                <p class="step-title">Active Directory</p>
               </div>
             </div>
             <div class="step-item" data-step="3">
               <div class="step-marker">3</div>
               <div class="step-details">
-                <p class="step-title">Samba Share</p>
+                <p class="step-title">Site</p>
               </div>
             </div>
             <div class="step-item" data-step="4">
               <div class="step-marker">4</div>
               <div class="step-details">
-                <p class="step-title">Cloudflare</p>
+                <p class="step-title">Samba Share</p>
               </div>
             </div>
             <div class="step-item" data-step="5">
               <div class="step-marker">5</div>
               <div class="step-details">
-                <p class="step-title">Resources</p>
+                <p class="step-title">Cloudflare</p>
               </div>
             </div>
             <div class="step-item" data-step="6">
               <div class="step-marker">6</div>
+              <div class="step-details">
+                <p class="step-title">Resources</p>
+              </div>
+            </div>
+            <div class="step-item" data-step="7">
+              <div class="step-marker">7</div>
               <div class="step-details">
                 <p class="step-title">Finish</p>
               </div>
@@ -56,7 +62,43 @@
           <div id="alert" class="notification is-hidden"></div>
 
           <div id="step-contents">
-            <form id="step-1" class="setup-step is-active">
+            <div id="step-1" class="setup-step is-active">
+              <h2 class="title is-4">Install Prerequisites</h2>
+              <p>Before continuing, ensure the host has Samba and Cloudflare Tunnel binaries installed.</p>
+              <div class="columns mt-3">
+                <div class="column">
+                  <article class="message" id="prereq-samba">
+                    <div class="message-header">
+                      <p>Samba (smbd)</p>
+                    </div>
+                    <div class="message-body">
+                      <p class="prereq-status-text">Checking...</p>
+                      <p class="is-size-7">Required for hosting setup helper files.</p>
+                    </div>
+                  </article>
+                </div>
+                <div class="column">
+                  <article class="message" id="prereq-cloudflared">
+                    <div class="message-header">
+                      <p>Cloudflared</p>
+                    </div>
+                    <div class="message-body">
+                      <p class="prereq-status-text">Checking...</p>
+                      <p class="is-size-7">Used for device-login to Cloudflare.</p>
+                    </div>
+                  </article>
+                </div>
+              </div>
+              <div class="content">
+                <p>Run the helper script to install prerequisites:</p>
+                <pre><code id="prereq-script">bash scripts/install-prereqs.sh</code></pre>
+              </div>
+              <div class="buttons">
+                <button class="button" id="prereq-refresh" type="button">Re-check</button>
+                <button class="button is-link" id="prereq-continue" type="button">Continue</button>
+              </div>
+            </div>
+            <form id="step-2" class="setup-step">
               <h2 class="title is-4">Active Directory Connection</h2>
               <div class="columns">
                 <div class="column">
@@ -121,8 +163,7 @@
                 </div>
               </div>
             </form>
-
-            <form id="step-2" class="setup-step">
+            <form id="step-3" class="setup-step">
               <h2 class="title is-4">Site Configuration</h2>
               <div class="columns">
                 <div class="column">
@@ -184,6 +225,10 @@
                       <label class="label">From Address</label>
                       <input class="input" name="smtpFrom" />
                     </div>
+                    <div class="field">
+                      <label class="label">Reply-To (optional)</label>
+                      <input class="input" name="smtpReplyTo" />
+                    </div>
                   </div>
                 </div>
               </div>
@@ -196,8 +241,7 @@
                 </div>
               </div>
             </form>
-
-            <form id="step-3" class="setup-step">
+            <form id="step-4" class="setup-step">
               <h2 class="title is-4">Samba Share</h2>
               <p class="mb-4">A temporary share is created while the appliance is running to host helper scripts. Provide the name users should map during setup.</p>
               <div class="columns">
@@ -219,7 +263,7 @@
                       <p>Samba Share Guidance</p>
                     </div>
                     <div class="message-body">
-                      Map the share as <code>\\\&lt;host&gt;\GateProxySetup</code> from your domain controller and certificate server. The server will automatically unpublish the share when Gate Proxy stops.
+                      Map the share as <code>\\&lt;host&gt;\GateProxySetup</code> from your domain controller and certificate server. The server will automatically unpublish the share when Gate Proxy stops.
                     </div>
                   </article>
                 </div>
@@ -233,8 +277,7 @@
                 </div>
               </div>
             </form>
-
-            <div id="step-4" class="setup-step">
+            <div id="step-5" class="setup-step">
               <h2 class="title is-4">Cloudflare Device Login</h2>
               <p>Cloudflare will issue a login code similar to the CLI workflow. Use the generated link to authenticate.</p>
               <div id="cloudflare-login" class="box">
@@ -250,8 +293,7 @@
                 </div>
               </div>
             </div>
-
-            <form id="step-5" class="setup-step">
+            <form id="step-6" class="setup-step">
               <h2 class="title is-4">Protected Resources</h2>
               <p>Add internal services that should be exposed after authentication. Configure at least one destination.</p>
               <div class="field">
@@ -271,8 +313,7 @@
                 </div>
               </div>
             </form>
-
-            <div id="step-6" class="setup-step">
+            <div id="step-7" class="setup-step">
               <h2 class="title is-4">Setup Complete</h2>
               <p>Review the summary and launch the appliance.</p>
               <div id="summary"></div>
@@ -281,11 +322,7 @@
               </div>
             </div>
           </div>
-        </div>
-      </div>
-    </section>
-
-    <script src="https://kit.fontawesome.com/a2e0e9b1ef.js" crossorigin="anonymous"></script>
+<script src="https://kit.fontawesome.com/a2e0e9b1ef.js" crossorigin="anonymous"></script>
     <script type="module" src="/assets/js/setup.js"></script>
   </body>
 </html>

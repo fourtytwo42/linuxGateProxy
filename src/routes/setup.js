@@ -9,6 +9,7 @@ import { testServiceBind, setBindPassword } from '../services/ldapService.js';
 import { startLogin as startCloudflareLogin } from '../services/cloudflareService.js';
 import { sambaManager } from '../services/sambaService.js';
 import { storeSmtpPassword } from '../services/otpService.js';
+import { commandExists } from '../utils/command.js';
 
 const router = Router();
 

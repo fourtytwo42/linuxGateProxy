@@ -3,13 +3,20 @@ const progressItems = Array.from(document.querySelectorAll('.step-item'));
 const alertBox = document.getElementById('alert');
 const summaryBox = document.getElementById('summary');
 const cloudflareStatus = document.getElementById('cloudflare-status');
+const prereqSambaCard = document.getElementById('prereq-samba');
+const prereqCloudflaredCard = document.getElementById('prereq-cloudflared');
+const prereqScriptNode = document.getElementById('prereq-script');
+const prereqRefreshButton = document.getElementById('prereq-refresh');
+const prereqContinueButton = document.getElementById('prereq-continue');
 
-const ldapForm = document.getElementById('step-1');
-const siteForm = document.getElementById('step-2');
-const sambaForm = document.getElementById('step-3');
+const prereqSection = document.getElementById('step-1');
+const ldapForm = document.getElementById('step-2');
+const siteForm = document.getElementById('step-3');
+const sambaForm = document.getElementById('step-4');
 
 let currentStep = 1;
 const setupState = {
+  prereqs: null,
   ldap: null,
   site: null,
   samba: null,
@@ -98,33 +105,131 @@ async function getJson(url) {
   return response.json();
 }
 
+function updatePrereqCard(element, installed) {
+  if (!element) return;
+  element.classList.remove('is-success', 'is-danger');
+  element.classList.add(installed ? 'is-success' : 'is-danger');
+  const textEl = element.querySelector('.prereq-status-text');
+  if (textEl) {
+    textEl.textContent = installed ? 'Installed' : 'Not detected';
+  }
+}
+
+function renderPrereqs(prereqs) {
+  if (!prereqs) {
+    return;
+  }
+  setupState.prereqs = prereqs;
+  updatePrereqCard(prereqSambaCard, prereqs.samba);
+  updatePrereqCard(prereqCloudflaredCard, prereqs.cloudflared);
+  if (prereqScriptNode) {
+    prereqScriptNode.textContent = `bash ${prereqs.installScript || 'scripts/install-prereqs.sh'}`;
+  }
+}
+
+async function loadStatus() {
+  return getJson('/api/setup/status');
+}
+
+async function refreshPrereqs() {
+  try {
+    const status = await loadStatus();
+    renderPrereqs(status.prerequisites);
+  } catch (error) {
+    showAlert(error.message);
+  }
+}
+
+function applyStatus(status, { updateForms = false } = {}) {
+  if (!status) {
+    return;
+  }
+  if (status.prerequisites) {
+    renderPrereqs(status.prerequisites);
+  }
+  setupState.cloudflare = status.cloudflareConfigured ? { configured: true } : null;
+  if (!updateForms) {
+    return;
+  }
+  if (status.auth) {
+    ldapForm.domain.value = status.auth.domain || '';
+    ldapForm.ldapHost.value = status.auth.ldapHost || '';
+    ldapForm.ldapPort.value = status.auth.ldapPort || 636;
+    ldapForm.baseDn.value = status.auth.baseDn || '';
+    ldapForm.lookupUser.value = status.auth.lookupUser || '';
+    ldapForm.sessionAttribute.value = status.auth.sessionAttribute || 'gateProxySession';
+    ldapForm.webAuthnAttribute.value = status.auth.webAuthnAttribute || 'gateProxyWebAuthn';
+    ldapForm.allowedGroupDns.value = (status.auth.allowedGroupDns || []).join('\n');
+    ldapForm.adminGroupDns.value = (status.auth.adminGroupDns || []).join('\n');
+    setupState.ldap = { ...status.auth };
+  }
+  if (status.site) {
+    siteForm.listenAddress.value = status.site.listenAddress || '127.0.0.1';
+    siteForm.listenPort.value = status.site.listenPort || 5000;
+    siteForm.publicBaseUrl.value = status.site.publicBaseUrl || '';
+    siteForm.sessionHours.value = status.site.sessionHours || 8;
+    siteForm.enableOtp.checked = Boolean(status.site.enableOtp);
+    siteForm.enableWebAuthn.checked = Boolean(status.site.enableWebAuthn);
+    siteForm.smtpHost.value = status.smtp?.host || '';
+    siteForm.smtpPort.value = status.smtp?.port || 587;
+    siteForm.smtpSecure.checked = Boolean(status.smtp?.secure);
+    siteForm.smtpUsername.value = status.smtp?.username || '';
+    siteForm.smtpFrom.value = status.smtp?.fromAddress || '';
+    if (siteForm.smtpReplyTo) {
+      siteForm.smtpReplyTo.value = status.smtp?.replyTo || '';
+    }
+    setupState.site = { ...status.site };
+  }
+  if (status.samba) {
+    sambaForm.shareName.value = status.samba.shareName || 'GateProxySetup';
+    sambaForm.guestOk.checked = Boolean(status.samba.guestOk);
+    setupState.samba = { ...status.samba };
+  }
+  resourceList.innerHTML = '';
+  if (status.resources?.length) {
+    status.resources.forEach((resource) => addResourceRow(resource));
+  }
+  const targetHostInput = resourcesForm?.querySelector('input[name="targetHost"]');
+  if (targetHostInput) {
+    targetHostInput.value = status.proxy?.targetHost || '';
+  }
+  setupState.resources = {
+    targetHost: status.proxy?.targetHost || '',
+    resources: status.resources || []
+  };
+}
+
 function prepareSummary() {
+  const ldap = setupState.ldap || {};
+  const site = setupState.site || {};
+  const samba = setupState.samba || { shareName: 'GateProxySetup' };
+  const resources = setupState.resources || { targetHost: 'Not configured', resources: [] };
   summaryBox.innerHTML = `
     <article class="message is-primary">
       <div class="message-header"><p>Active Directory</p></div>
       <div class="message-body">
-        <p><strong>Domain:</strong> ${setupState.ldap.domain}</p>
-        <p><strong>LDAP Host:</strong> ${setupState.ldap.ldapHost}</p>
+        <p><strong>Domain:</strong> ${ldap.domain || 'Not set'}</p>
+        <p><strong>LDAP Host:</strong> ${ldap.ldapHost || 'Not set'}</p>
       </div>
     </article>
     <article class="message is-primary">
       <div class="message-header"><p>Site</p></div>
       <div class="message-body">
-        <p><strong>Public URL:</strong> ${setupState.site.publicBaseUrl || 'Not set'}</p>
-        <p><strong>Session Hours:</strong> ${setupState.site.sessionHours}</p>
+        <p><strong>Public URL:</strong> ${site.publicBaseUrl || 'Not set'}</p>
+        <p><strong>Session Hours:</strong> ${site.sessionHours || '?'} </p>
       </div>
     </article>
     <article class="message is-primary">
       <div class="message-header"><p>Samba</p></div>
       <div class="message-body">
-        <p><strong>Share Name:</strong> ${setupState.samba.shareName}</p>
+        <p><strong>Share Name:</strong> ${samba.shareName || 'GateProxySetup'}</p>
       </div>
     </article>
     <article class="message is-primary">
       <div class="message-header"><p>Resources</p></div>
       <div class="message-body">
-        <p><strong>Primary Target:</strong> ${setupState.resources.targetHost}</p>
-        <p><strong>Defined Resources:</strong> ${setupState.resources.resources.length}</p>
+        <p><strong>Primary Target:</strong> ${resources.targetHost || 'Not set'}</p>
+        <p><strong>Defined Resources:</strong> ${resources.resources?.length || 0}</p>
       </div>
     </article>
   `;
@@ -139,7 +244,21 @@ document.querySelectorAll('button[data-action="prev"]').forEach((button) => {
   });
 });
 
-// Step 1 - LDAP
+prereqRefreshButton?.addEventListener('click', async () => {
+  clearAlert();
+  await refreshPrereqs();
+});
+
+prereqContinueButton?.addEventListener('click', () => {
+  clearAlert();
+  if (!setupState.prereqs?.samba || !setupState.prereqs?.cloudflared) {
+    showAlert('Install Samba and Cloudflared using the helper script before continuing.');
+    return;
+  }
+  showStep(2);
+});
+
+// Step 2 - LDAP
 ldapForm.addEventListener('submit', async (event) => {
   event.preventDefault();
   clearAlert();
@@ -156,7 +275,7 @@ ldapForm.addEventListener('submit', async (event) => {
   try {
     await postJson('/api/setup/ldap', payload);
     setupState.ldap = payload;
-    showStep(2);
+    showStep(5);
   } catch (error) {
     showAlert(error.message);
   }
@@ -210,7 +329,7 @@ sambaForm.addEventListener('submit', async (event) => {
   try {
     await postJson('/api/setup/samba', payload);
     setupState.samba = payload;
-    showStep(4);
+    showStep(5);
   } catch (error) {
     showAlert(error.message);
   }
@@ -240,12 +359,13 @@ document.getElementById('cloudflare-next').addEventListener('click', (event) => 
     showAlert('Complete Cloudflare authentication before continuing.');
     return;
   }
-  showStep(5);
+  showStep(6);
 });
 
 // Step 5 - Resources
 const resourceList = document.getElementById('resource-list');
 const addResourceButton = document.getElementById('add-resource');
+const resourcesForm = document.getElementById('step-6');
 
 function addResourceRow(resource = {}) {
   const wrapper = document.createElement('div');
@@ -283,7 +403,7 @@ function addResourceRow(resource = {}) {
 
 addResourceButton.addEventListener('click', () => addResourceRow());
 
-document.getElementById('step-5').addEventListener('submit', async (event) => {
+resourcesForm.addEventListener('submit', async (event) => {
   event.preventDefault();
   const payload = serializeForm(event.target);
   const resources = Array.from(document.querySelectorAll('.resource-row')).map((row) => {
@@ -299,7 +419,7 @@ document.getElementById('step-5').addEventListener('submit', async (event) => {
     });
     setupState.resources = { targetHost: payload.targetHost, resources };
     prepareSummary();
-    showStep(6);
+    showStep(7);
   } catch (error) {
     showAlert(error.message);
   }
@@ -314,58 +434,15 @@ document.getElementById('finish-setup').addEventListener('click', async () => {
   }
 });
 
-async function populateForms() {
-  try {
-    const status = await getJson('/api/setup/status');
-
-    if (status.auth) {
-      ldapForm.domain.value = status.auth.domain || '';
-      ldapForm.ldapHost.value = status.auth.ldapHost || '';
-      ldapForm.ldapPort.value = status.auth.ldapPort || 636;
-      ldapForm.baseDn.value = status.auth.baseDn || '';
-      ldapForm.lookupUser.value = status.auth.lookupUser || '';
-      ldapForm.sessionAttribute.value = status.auth.sessionAttribute || 'gateProxySession';
-      ldapForm.webAuthnAttribute.value = status.auth.webAuthnAttribute || 'gateProxyWebAuthn';
-      ldapForm.allowedGroupDns.value = (status.auth.allowedGroupDns || []).join('\n');
-      ldapForm.adminGroupDns.value = (status.auth.adminGroupDns || []).join('\n');
-    }
-
-    if (status.site) {
-      siteForm.listenAddress.value = status.site.listenAddress || '127.0.0.1';
-      siteForm.listenPort.value = status.site.listenPort || 5000;
-      siteForm.publicBaseUrl.value = status.site.publicBaseUrl || '';
-      siteForm.sessionHours.value = status.site.sessionHours || 8;
-      siteForm.enableOtp.checked = Boolean(status.site.enableOtp);
-      siteForm.enableWebAuthn.checked = Boolean(status.site.enableWebAuthn);
-    }
-
-    if (status.smtp) {
-      siteForm.smtpHost.value = status.smtp.host || '';
-      siteForm.smtpPort.value = status.smtp.port || 587;
-      siteForm.smtpSecure.checked = Boolean(status.smtp.secure);
-      siteForm.smtpUsername.value = status.smtp.username || '';
-      siteForm.smtpFrom.value = status.smtp.fromAddress || '';
-      if (siteForm.smtpReplyTo) {
-        siteForm.smtpReplyTo.value = status.smtp.replyTo || '';
-      }
-    }
-
-    if (status.samba) {
-      sambaForm.shareName.value = status.samba.shareName || 'GateProxySetup';
-      sambaForm.guestOk.checked = Boolean(status.samba.guestOk);
-    }
-
-    if (status.resources?.length) {
-      status.resources.forEach((resource) => addResourceRow(resource));
-    }
-  } catch (error) {
-    console.warn('Failed to load setup status', error);
-  }
-}
-
 async function initialize() {
-  await populateForms();
-  showStep(1);
+  try {
+    const status = await loadStatus();
+    applyStatus(status, { updateForms: true });
+  } catch (error) {
+    showAlert(error.message);
+  } finally {
+    showStep(1);
+  }
 }
 
 initialize();

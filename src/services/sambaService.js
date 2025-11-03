@@ -5,6 +5,7 @@ import { loadConfig, saveConfigSection } from '../config/index.js';
 import { ensureDirSync, writeFileSecureSync } from '../utils/fs.js';
 import { logger } from '../utils/logger.js';
 import { runtimeDir, shareDir, projectRoot } from '../utils/paths.js';
+import { commandExists } from '../utils/command.js';
 
 const SMB_CONF = path.join(runtimeDir, 'smb.conf');
 
@@ -56,6 +57,10 @@ class SambaManager {
   }
 
   start() {
+    if (!commandExists('smbd')) {
+      logger.warn('Samba binaries not found; skipping share startup');
+      return;
+    }
     const config = loadConfig();
     const sharePath = config.samba.sharePath || shareDir;
     this.ensureShareDirectory(sharePath);
