@@ -112,7 +112,7 @@ async function startServer() {
   });
 
   const config = loadConfig();
-  if (config.samba.shareName) {
+  if (config.setup.completed && config.samba.shareName) {
     try {
       sambaManager.start();
     } catch (error) {

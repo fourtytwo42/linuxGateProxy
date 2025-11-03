@@ -85,26 +85,67 @@ class SambaManager {
       return;
     }
 
+    let started = false;
+    let startTimeout;
+
     try {
       this.process = spawn('smbd', ['--foreground', '--configfile', SMB_CONF], {
-        stdio: ['ignore', 'inherit', 'inherit']
+        stdio: ['ignore', 'pipe', 'pipe']
       });
     } catch (error) {
       logger.error('Failed to launch smbd', { error: error.message });
       return;
     }
 
+    if (!this.process) {
+      logger.warn('Samba process is null');
+      return;
+    }
+
+    this.process.stdout.setEncoding('utf8');
+    this.process.stderr.setEncoding('utf8');
+    
+    let stderrBuffer = '';
+    this.process.stdout.on('data', () => {});
+    this.process.stderr.on('data', (data) => {
+      stderrBuffer += data;
+      // Suppress known permission errors that don't prevent operation
+      if (data.includes('Permission denied') && data.includes('/var/log/samba/')) {
+        // Silently ignore - we're using our own log directory
+        return;
+      }
+    });
+
     this.process.on('error', (error) => {
+      if (startTimeout) {
+        clearTimeout(startTimeout);
+      }
       logger.warn('Samba share unavailable', { error: error.message });
       this.process = null;
+      started = false;
     });
 
     this.process.on('exit', (code, signal) => {
-    logger.warn('Samba share stopped', { code, signal });
+      if (startTimeout) {
+        clearTimeout(startTimeout);
+      }
+      if (!started) {
+        // Process exited before we confirmed it started
+        logger.warn('Samba share failed to start', { code, signal, stderr: stderrBuffer.trim().slice(0, 200) });
+      } else {
+        logger.warn('Samba share stopped', { code, signal });
+      }
       this.process = null;
+      started = false;
     });
 
-    logger.info('Samba share started', { shareName: config.samba.shareName, sharePath });
+    // Wait 2 seconds before confirming start to catch immediate failures
+    startTimeout = setTimeout(() => {
+      if (this.process && this.process.exitCode === null) {
+        started = true;
+        logger.info('Samba share started', { shareName: config.samba.shareName, sharePath });
+      }
+    }, 2000);
   }
 
   stop() {
