@@ -144,16 +144,61 @@ export async function testServiceBind(settings, password, { rejectUnauthorized =
       : undefined
   });
 
+  // Generate username formats to try
+  const usernameFormats = [];
+  const lookupUser = settings.lookupUser.trim();
+  
+  // If username already has @ or \, try it as-is first
+  if (lookupUser.includes('@') || lookupUser.includes('\\')) {
+    usernameFormats.push(lookupUser);
+  } else {
+    // Try plain username first
+    usernameFormats.push(lookupUser);
+    
+    // If domain is available, try UPN format
+    if (settings.domain) {
+      usernameFormats.push(`${lookupUser}@${settings.domain}`);
+    }
+    
+    // Try DOMAIN\username format if domain is available
+    if (settings.domain) {
+      const domainNetbios = settings.domain.split('.')[0].toUpperCase();
+      usernameFormats.push(`${domainNetbios}\\${lookupUser}`);
+      // Also try lowercase
+      usernameFormats.push(`${settings.domain.split('.')[0].toLowerCase()}\\${lookupUser}`);
+    }
+  }
+
+  let lastError = null;
+  let bound = false;
+  
   try {
-    await client.bind(settings.lookupUser, password);
-    return true;
-  } catch (error) {
-    // Re-throw with parsed error message
-    const friendlyError = new Error(parseLdapError(error));
-    friendlyError.originalError = error;
-    throw friendlyError;
+    for (const usernameFormat of usernameFormats) {
+      try {
+        await client.bind(usernameFormat, password);
+        bound = true;
+        // Success! Return true (will unbind in finally)
+        return true;
+      } catch (error) {
+        lastError = error;
+        // Bind failed, continue to next format (no need to unbind after failed bind)
+      }
+    }
+
+    // All formats failed, throw the last error with parsed message
+    if (lastError) {
+      const friendlyError = new Error(parseLdapError(lastError));
+      friendlyError.originalError = lastError;
+      throw friendlyError;
+    }
+
+    // This should never happen, but just in case
+    throw new Error('Unable to bind to LDAP server');
   } finally {
-    await client.unbind().catch(() => {});
+    // Ensure client is cleaned up if we successfully bound
+    if (bound) {
+      await client.unbind().catch(() => {});
+    }
   }
 }
 
