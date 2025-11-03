@@ -67,6 +67,21 @@ async function startServer() {
   app.use(express.static(publicDir, { index: false }));
   app.use('/assets', express.static(path.join(publicDir, 'assets')));
 
+  // Serve setup scripts via HTTP (alternative to Samba share)
+  app.use('/share', express.static(shareDir, {
+    index: false,
+    setHeaders: (res, filePath) => {
+      // Set appropriate headers for file downloads
+      if (filePath.endsWith('.ps1')) {
+        res.setHeader('Content-Type', 'application/x-powershell');
+        res.setHeader('Content-Disposition', 'attachment');
+      } else if (filePath.endsWith('.sh')) {
+        res.setHeader('Content-Type', 'application/x-sh');
+        res.setHeader('Content-Disposition', 'attachment');
+      }
+    }
+  }));
+
   app.use((req, res, next) => {
     const config = loadConfig();
     req.gateConfig = config;
@@ -112,13 +127,15 @@ async function startServer() {
   });
 
   const config = loadConfig();
-  if (config.setup.completed && config.samba.shareName) {
-    try {
-      sambaManager.start();
-    } catch (error) {
-      logger.error('Failed to start Samba share', { error: error.message });
-    }
-  }
+  // Samba is no longer used - files are served via HTTP at /share
+  // Keeping this code commented out in case we want to make Samba optional in the future
+  // if (config.setup.completed && config.samba.shareName) {
+  //   try {
+  //     sambaManager.start();
+  //   } catch (error) {
+  //     logger.error('Failed to start Samba share', { error: error.message });
+  //   }
+  // }
 
   setInterval(() => purgeExpiredOtps(), 60 * 1000);
 

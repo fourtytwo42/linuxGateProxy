@@ -3,7 +3,7 @@ const progressItems = Array.from(document.querySelectorAll('.step-item'));
 const alertBox = document.getElementById('alert');
 const summaryBox = document.getElementById('summary');
 const cloudflareStatus = document.getElementById('cloudflare-status');
-const prereqSambaCard = document.getElementById('prereq-samba');
+// Samba is no longer required - using HTTP file serving instead
 const prereqCloudflaredCard = document.getElementById('prereq-cloudflared');
 const prereqScriptNode = document.getElementById('prereq-script');
 const prereqRefreshButton = document.getElementById('prereq-refresh');
@@ -12,7 +12,7 @@ const prereqContinueButton = document.getElementById('prereq-continue');
 const prereqSection = document.getElementById('step-1');
 const ldapForm = document.getElementById('step-2');
 const siteForm = document.getElementById('step-3');
-const sambaForm = document.getElementById('step-4');
+const step4Div = document.getElementById('step-4');
 
 let currentStep = 1;
 const setupState = {
@@ -120,7 +120,7 @@ function renderPrereqs(prereqs) {
     return;
   }
   setupState.prereqs = prereqs;
-  updatePrereqCard(prereqSambaCard, prereqs.samba);
+  // Samba no longer required
   updatePrereqCard(prereqCloudflaredCard, prereqs.cloudflared);
   if (prereqScriptNode) {
     prereqScriptNode.textContent = `bash ${prereqs.installScript || 'scripts/install-prereqs.sh'}`;
@@ -180,10 +180,9 @@ function applyStatus(status, { updateForms = false } = {}) {
     }
     setupState.site = { ...status.site };
   }
-  if (status.samba) {
-    sambaForm.shareName.value = status.samba.shareName || 'GateProxySetup';
-    sambaForm.guestOk.checked = Boolean(status.samba.guestOk);
-    setupState.samba = { ...status.samba };
+  // Step 4 is now informational - just show the HTTP share URL
+  if (step4Div) {
+    updateShareUrl();
   }
   resourceList.innerHTML = '';
   if (status.resources?.length) {
@@ -321,18 +320,59 @@ siteForm.addEventListener('submit', async (event) => {
   }
 });
 
-// Step 3 - Samba
-sambaForm.addEventListener('submit', async (event) => {
-  event.preventDefault();
-  const payload = serializeForm(event.target);
-  payload.guestOk = !!payload.guestOk;
-  try {
-    await postJson('/api/setup/samba', payload);
-    setupState.samba = payload;
-    showStep(5);
-  } catch (error) {
-    showAlert(error.message);
+// Step 4 - Setup Scripts (HTTP file server)
+function updateShareUrl() {
+  const shareUrlInput = document.getElementById('share-url');
+  if (shareUrlInput) {
+    // Use window.location to get the current host and port
+    const protocol = window.location.protocol;
+    const hostname = window.location.hostname;
+    const port = window.location.port || (protocol === 'https:' ? '443' : '80');
+    // For localhost, show localhost; otherwise show the actual hostname/IP
+    const baseUrl = `${protocol}//${hostname}${port && port !== '80' && port !== '443' ? `:${port}` : ''}`;
+    shareUrlInput.value = `${baseUrl}/share/`;
   }
+}
+
+// Update share URL when step 4 is shown
+// We'll hook into the existing showStep calls by observing step visibility
+const step4Observer = new MutationObserver(() => {
+  if (step4Div && step4Div.classList.contains('is-active')) {
+    updateShareUrl();
+  }
+});
+if (step4Div) {
+  step4Observer.observe(step4Div, { attributes: true, attributeFilter: ['class'] });
+}
+
+// Copy share URL button
+document.getElementById('copy-share-url')?.addEventListener('click', async (event) => {
+  event.preventDefault();
+  const shareUrlInput = document.getElementById('share-url');
+  if (shareUrlInput) {
+    shareUrlInput.select();
+    try {
+      await navigator.clipboard.writeText(shareUrlInput.value);
+      const button = event.target;
+      const originalText = button.textContent;
+      button.textContent = 'Copied!';
+      button.classList.add('is-success');
+      setTimeout(() => {
+        button.textContent = originalText;
+        button.classList.remove('is-success');
+      }, 2000);
+    } catch (error) {
+      // Fallback for browsers that don't support clipboard API
+      document.execCommand('copy');
+    }
+  }
+});
+
+// Step 4 Continue button (no form submission needed)
+step4Div?.querySelector('button[data-action="next"]')?.addEventListener('click', (event) => {
+  event.preventDefault();
+  setupState.samba = { enabled: true, method: 'http' }; // Mark as enabled for consistency
+  showStep(5);
 });
 
 // Step 4 - Cloudflare

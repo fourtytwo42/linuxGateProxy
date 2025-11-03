@@ -36,7 +36,7 @@
             <div class="step-item" data-step="4">
               <div class="step-marker">4</div>
               <div class="step-details">
-                <p class="step-title">Samba Share</p>
+                <p class="step-title">Setup Scripts</p>
               </div>
             </div>
             <div class="step-item" data-step="5">
@@ -64,19 +64,8 @@
           <div id="step-contents">
             <div id="step-1" class="setup-step is-active">
               <h2 class="title is-4">Install Prerequisites</h2>
-              <p>Before continuing, ensure the host has Samba and Cloudflare Tunnel binaries installed.</p>
+              <p>Before continuing, ensure the host has Cloudflare Tunnel binary installed.</p>
               <div class="columns mt-3">
-                <div class="column">
-                  <article class="message" id="prereq-samba">
-                    <div class="message-header">
-                      <p>Samba (smbd)</p>
-                    </div>
-                    <div class="message-body">
-                      <p class="prereq-status-text">Checking...</p>
-                      <p class="is-size-7">Required for hosting setup helper files.</p>
-                    </div>
-                  </article>
-                </div>
                 <div class="column">
                   <article class="message" id="prereq-cloudflared">
                     <div class="message-header">
@@ -241,29 +230,38 @@
                 </div>
               </div>
             </form>
-            <form id="step-4" class="setup-step">
-              <h2 class="title is-4">Samba Share</h2>
-              <p class="mb-4">A temporary share is created while the appliance is running to host helper scripts. Provide the name users should map during setup.</p>
+            <div id="step-4" class="setup-step">
+              <h2 class="title is-4">Setup Scripts</h2>
+              <p class="mb-4">Helper scripts are available via HTTP for download to your domain controller and certificate server.</p>
               <div class="columns">
                 <div class="column">
-                  <div class="field">
-                    <label class="label">Share Name</label>
-                    <input class="input" name="shareName" value="GateProxySetup" />
-                  </div>
-                  <div class="field">
-                    <label class="checkbox">
-                      <input type="checkbox" name="guestOk" />
-                      Allow guest access (not recommended)
-                    </label>
+                  <div class="box">
+                    <p class="has-text-weight-semibold mb-3">Access Setup Scripts</p>
+                    <p class="mb-3">Scripts are served at:</p>
+                    <div class="field">
+                      <div class="control">
+                        <input class="input is-family-monospace" id="share-url" type="text" readonly value="http://localhost:5000/share/" />
+                        <button class="button is-small mt-2" id="copy-share-url">Copy URL</button>
+                      </div>
+                    </div>
+                    <p class="mt-4 mb-2"><strong>Available scripts:</strong></p>
+                    <ul>
+                      <li><code>/share/configure-domain-controller.ps1</code></li>
+                      <li><code>/share/configure-certificate-server.ps1</code></li>
+                    </ul>
                   </div>
                 </div>
                 <div class="column">
                   <article class="message is-info">
                     <div class="message-header">
-                      <p>Samba Share Guidance</p>
+                      <p>Download Instructions</p>
                     </div>
                     <div class="message-body">
-                      Map the share as <code>\\&lt;host&gt;\GateProxySetup</code> from your domain controller and certificate server. The server will automatically unpublish the share when Gate Proxy stops.
+                      <p class="mb-3"><strong>From PowerShell:</strong></p>
+                      <pre class="has-background-black has-text-white-ter p-3 mb-4"><code>Invoke-WebRequest -Uri "http://&lt;server-ip&gt;:5000/share/configure-domain-controller.ps1" -OutFile "configure-domain-controller.ps1"</code></pre>
+                      <p class="mb-3"><strong>From browser:</strong></p>
+                      <p>Navigate to the URL above and download the scripts directly.</p>
+                      <p class="mt-4"><strong>Note:</strong> Replace <code>localhost</code> with your server's IP address when accessing from other machines.</p>
                     </div>
                   </article>
                 </div>
@@ -273,10 +271,10 @@
                   <button class="button" data-action="prev">Back</button>
                 </div>
                 <div class="control">
-                  <button class="button is-link" type="submit">Enable Share</button>
+                  <button class="button is-link" data-action="next">Continue</button>
                 </div>
               </div>
-            </form>
+            </div>
             <div id="step-5" class="setup-step">
               <h2 class="title is-4">Cloudflare Authentication</h2>
               <p>Authenticate with Cloudflare to authorize this application to manage tunnels on your account.</p>
