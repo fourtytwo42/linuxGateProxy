@@ -31,9 +31,29 @@ export class ConfigStore {
         target_url TEXT NOT NULL,
         icon TEXT,
         required_group TEXT,
+        allowed_groups TEXT,
         created_at TEXT NOT NULL DEFAULT (datetime('now')),
         updated_at TEXT NOT NULL DEFAULT (datetime('now'))
       );
+    `);
+
+    // Migrate existing schema: add allowed_groups column if it doesn't exist
+    try {
+      this.db.exec(`ALTER TABLE resources ADD COLUMN allowed_groups TEXT`);
+    } catch (error) {
+      // Column already exists, ignore
+      if (!error.message.includes('duplicate column name')) {
+        throw error;
+      }
+    }
+    
+    // Migrate required_group to allowed_groups for existing resources
+    this.db.exec(`
+      UPDATE resources 
+      SET allowed_groups = json_array(required_group)
+      WHERE required_group IS NOT NULL 
+        AND required_group != ''
+        AND (allowed_groups IS NULL OR allowed_groups = '' OR allowed_groups = '[]')
     `);
 
     this.setSettingStatement = this.db.prepare(
@@ -89,29 +109,65 @@ export class ConfigStore {
   }
 
   listResources() {
-    return this.listResourcesStatement.all();
+    const resources = this.listResourcesStatement.all();
+    // Parse allowed_groups from JSON and handle backwards compatibility
+    return resources.map((resource) => {
+      // Parse allowed_groups from JSON string
+      let allowedGroups = [];
+      if (resource.allowed_groups) {
+        try {
+          allowedGroups = JSON.parse(resource.allowed_groups);
+        } catch (e) {
+          // Invalid JSON, try as single value
+          allowedGroups = resource.allowed_groups ? [resource.allowed_groups] : [];
+        }
+      } else if (resource.required_group) {
+        // Backwards compatibility: migrate required_group to allowed_groups
+        allowedGroups = [resource.required_group];
+      }
+      
+      return {
+        ...resource,
+        allowed_groups: allowedGroups,
+        // Keep required_group for backwards compatibility but prefer allowed_groups
+        required_group: allowedGroups.length === 1 ? allowedGroups[0] : resource.required_group
+      };
+    });
   }
 
   upsertResource(resource) {
     // Normalize resource object to ensure all required fields are present
+    // Handle allowed_groups: accept array or single value, convert to JSON array
+    let allowedGroups = [];
+    if (resource.allowed_groups) {
+      allowedGroups = Array.isArray(resource.allowed_groups) 
+        ? resource.allowed_groups 
+        : [resource.allowed_groups];
+    } else if (resource.required_group || resource.requiredGroup || resource.groupDn) {
+      // Backwards compatibility: migrate single required_group to allowed_groups
+      allowedGroups = [resource.required_group || resource.requiredGroup || resource.groupDn];
+    }
+    
     const normalized = {
       id: resource.id,
       name: resource.name || '',
       description: resource.description || '',
       target_url: resource.target_url || resource.targetUrl || '',
       icon: resource.icon || '',
-      required_group: resource.required_group || resource.requiredGroup || resource.groupDn || null
+      required_group: resource.required_group || resource.requiredGroup || resource.groupDn || null,
+      allowed_groups: allowedGroups.length > 0 ? JSON.stringify(allowedGroups) : null
     };
 
     const stmt = this.db.prepare(`
-      INSERT INTO resources (id, name, description, target_url, icon, required_group, created_at, updated_at)
-      VALUES (@id, @name, @description, @target_url, @icon, @required_group, datetime('now'), datetime('now'))
+      INSERT INTO resources (id, name, description, target_url, icon, required_group, allowed_groups, created_at, updated_at)
+      VALUES (@id, @name, @description, @target_url, @icon, @required_group, @allowed_groups, datetime('now'), datetime('now'))
       ON CONFLICT(id) DO UPDATE SET
         name = excluded.name,
         description = excluded.description,
         target_url = excluded.target_url,
         icon = excluded.icon,
         required_group = excluded.required_group,
+        allowed_groups = excluded.allowed_groups,
         updated_at = datetime('now')
     `);
     stmt.run(normalized);

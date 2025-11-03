@@ -18,7 +18,6 @@ export const defaultSettings = {
     lookupUser: '',
     sessionAttribute: 'gateProxySession',
     webAuthnAttribute: 'gateProxyWebAuthn',
-    allowedGroupDns: [],
     resourceGroups: {},
     adminGroupDns: []
   },

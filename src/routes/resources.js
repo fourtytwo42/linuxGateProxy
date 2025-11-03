@@ -10,10 +10,16 @@ const router = Router();
 
 function filterResourcesForUser(resources, user) {
   return resources.filter((resource) => {
-    if (!resource.required_group) {
-      return true;
+    // Check allowed_groups array (new way)
+    if (resource.allowed_groups && Array.isArray(resource.allowed_groups) && resource.allowed_groups.length > 0) {
+      return userHasGroup(user, resource.allowed_groups);
     }
-    return userHasGroup(user, [resource.required_group]);
+    // Backwards compatibility: check required_group (old way)
+    if (resource.required_group) {
+      return userHasGroup(user, [resource.required_group]);
+    }
+    // No group restriction - allow access
+    return true;
   });
 }
 
@@ -43,8 +49,16 @@ router.use('/resource/:id', requireAuth, (req, res, next) => {
   if (!resource) {
     return res.status(404).send('Resource not found');
   }
-  if (resource.required_group && !userHasGroup(req.auth.user, [resource.required_group])) {
-    return res.status(403).send('Forbidden');
+  // Check allowed_groups array (new way)
+  if (resource.allowed_groups && Array.isArray(resource.allowed_groups) && resource.allowed_groups.length > 0) {
+    if (!userHasGroup(req.auth.user, resource.allowed_groups)) {
+      return res.status(403).send('Forbidden');
+    }
+  } else if (resource.required_group) {
+    // Backwards compatibility: check required_group (old way)
+    if (!userHasGroup(req.auth.user, [resource.required_group])) {
+      return res.status(403).send('Forbidden');
+    }
   }
   const target = resource.target_url || loadConfig().proxy.targetHost;
   return proxyRequest(req, res, next, target);

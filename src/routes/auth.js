@@ -133,21 +133,9 @@ router.post('/api/login', loginLimiter, async (req, res, next) => {
     });
 
     const config = loadConfig();
-    logger.debug('Checking group membership', { 
-      allowedGroups: config.auth.allowedGroupDns || [],
-      userGroups: user.memberOf || []
-    });
+    // Global allowedGroupDns check removed - access control is now per-resource via allowed_groups
+    // All authenticated users can log in, but will only see/access resources they have permission for
     
-    const allowedGroups = config.auth.allowedGroupDns || [];
-    if (allowedGroups.length && !userHasGroup(user, allowedGroups)) {
-      logger.warn('User denied access - not in allowed groups', { 
-        username: user.sAMAccountName || user.userPrincipalName,
-        allowedGroups
-      });
-      return res.status(403).json({ error: 'Access denied' });
-    }
-    logger.debug('Group membership check passed');
-
     const pending = createPending(user, { returnUrl });
     logger.debug('Created pending login', { pendingId: pending.id });
 

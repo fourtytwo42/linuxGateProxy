@@ -36,8 +36,7 @@ router.get('/api/setup/status', (req, res) => {
       baseDn: config.auth.baseDn,
       sessionAttribute: config.auth.sessionAttribute,
       webAuthnAttribute: config.auth.webAuthnAttribute,
-      adminGroupDns: config.auth.adminGroupDns,
-      allowedGroupDns: config.auth.allowedGroupDns
+      adminGroupDns: config.auth.adminGroupDns
     },
     cloudflareConfigured: Boolean(config.cloudflare.certPem) || hasCertificate(),
     smtp: config.smtp,
@@ -57,7 +56,6 @@ router.post('/api/setup/ldap', async (req, res, next) => {
       useLdaps = true,
       sessionAttribute,
       webAuthnAttribute,
-      allowedGroupDns = [],
       adminGroupDns = []
     } = req.body;
 
@@ -84,7 +82,6 @@ router.post('/api/setup/ldap', async (req, res, next) => {
       lookupUser,
       sessionAttribute: sessionAttribute || 'gateProxySession',
       webAuthnAttribute: webAuthnAttribute || 'gateProxyWebAuthn',
-      allowedGroupDns: allowedGroupDns.length ? allowedGroupDns : existingAuth.allowedGroupDns,
       adminGroupDns: defaultAdminGroups
     });
 

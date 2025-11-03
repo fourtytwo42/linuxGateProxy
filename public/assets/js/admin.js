@@ -152,9 +152,86 @@ const resourceForm = document.getElementById('resource-form');
 const resourceSaveButton = document.getElementById('resource-save');
 const resourceCancelButton = document.getElementById('resource-cancel');
 
+// Resource group management
+const resourceGroupSearch = document.getElementById('resource-group-search');
+const resourceGroupSelect = document.getElementById('resource-group-select');
+const resourceGroupAddBtn = document.getElementById('resource-group-add');
+const resourceGroupsList = document.getElementById('resource-groups-list');
+let resourceGroups = [];
+
+let resourceGroupSearchTimeout = null;
+
+function renderResourceGroupList(groups, listElement) {
+  if (!groups || groups.length === 0) {
+    listElement.innerHTML = '<p class="has-text-grey is-size-7">No groups selected - resource will be accessible to all authenticated users</p>';
+    return;
+  }
+  
+  listElement.innerHTML = '';
+  groups.forEach((group) => {
+    const tag = document.createElement('div');
+    tag.className = 'tags has-addons mb-2';
+    tag.style.marginRight = '0.5rem';
+    
+    const tagLabel = document.createElement('span');
+    tagLabel.className = 'tag is-link';
+    tagLabel.textContent = group.name || group.dn;
+    tagLabel.title = group.dn;
+    
+    const tagDelete = document.createElement('a');
+    tagDelete.className = 'tag is-delete';
+    tagDelete.addEventListener('click', () => {
+      const index = resourceGroups.findIndex((g) => g.dn === group.dn);
+      if (index > -1) {
+        resourceGroups.splice(index, 1);
+        renderResourceGroupList(resourceGroups, resourceGroupsList);
+        updateResourceGroupHiddenInput();
+      }
+    });
+    
+    tag.appendChild(tagLabel);
+    tag.appendChild(tagDelete);
+    listElement.appendChild(tag);
+  });
+}
+
+function updateResourceGroupHiddenInput() {
+  const hiddenInput = document.getElementById('resource-allowed-groups');
+  hiddenInput.value = JSON.stringify(resourceGroups.map((g) => g.dn));
+}
+
+function addResourceGroupToList(dn, name) {
+  if (!resourceGroups.find((g) => g.dn === dn)) {
+    resourceGroups.push({ dn, name });
+    renderResourceGroupList(resourceGroups, resourceGroupsList);
+    updateResourceGroupHiddenInput();
+    resourceGroupSelect.value = '';
+    resourceGroupSearch.value = '';
+  }
+}
+
+// Resource group search
+resourceGroupSearch.addEventListener('input', (e) => {
+  clearTimeout(resourceGroupSearchTimeout);
+  const query = e.target.value.trim();
+  resourceGroupSearchTimeout = setTimeout(() => {
+    searchGroups(query, resourceGroupSelect);
+  }, 300);
+});
+
+resourceGroupAddBtn.addEventListener('click', () => {
+  const selectedOption = resourceGroupSelect.options[resourceGroupSelect.selectedIndex];
+  if (selectedOption && selectedOption.value) {
+    addResourceGroupToList(selectedOption.value, selectedOption.dataset.name || selectedOption.textContent);
+  }
+});
+
 // Open resource modal
 resourceAddButton.addEventListener('click', () => {
   resourceForm.reset();
+  resourceGroups = [];
+  renderResourceGroupList(resourceGroups, resourceGroupsList);
+  updateResourceGroupHiddenInput();
   resourceModal.classList.add('is-active');
 });
 
@@ -177,22 +254,29 @@ resourceSaveButton.addEventListener('click', async () => {
   }
   
   const formData = new FormData(resourceForm);
+  // Read allowed_groups from hidden input
+  const allowedGroupsInput = document.getElementById('resource-allowed-groups');
+  const allowedGroups = allowedGroupsInput.value ? JSON.parse(allowedGroupsInput.value) : [];
+  
   const payload = {
     id: generateId(),
     name: formData.get('name'),
     target_url: formData.get('target_url'),
     description: formData.get('description') || '',
     icon: formData.get('icon') || '',
-    required_group: formData.get('required_group') || null
+    allowed_groups: allowedGroups
   };
   
   try {
     await postJson('/admin/api/resources', payload);
-    resources.push(payload);
+    resources.push({ ...payload, allowed_groups });
     renderResources();
     renderStatusCards();
     resourceModal.classList.remove('is-active');
     resourceForm.reset();
+    resourceGroups = [];
+    renderResourceGroupList(resourceGroups, resourceGroupsList);
+    updateResourceGroupHiddenInput();
     clearAlert();
   } catch (error) {
     showAlert(error.message);
@@ -202,10 +286,9 @@ resourceSaveButton.addEventListener('click', async () => {
 settingsForm.addEventListener('submit', async (event) => {
   event.preventDefault();
   clearAlert();
-  // Read groups from hidden inputs (JSON arrays)
-  const allowedGroupDnsInput = document.getElementById('allowedGroupDns');
+  // Read admin groups from hidden input (JSON array)
+  // Allowed groups are now configured per-resource, not globally
   const adminGroupDnsInput = document.getElementById('adminGroupDns');
-  const allowedGroupDns = allowedGroupDnsInput.value ? JSON.parse(allowedGroupDnsInput.value) : [];
   const adminGroupDns = adminGroupDnsInput.value ? JSON.parse(adminGroupDnsInput.value) : [];
   
   const payload = {
@@ -213,14 +296,12 @@ settingsForm.addEventListener('submit', async (event) => {
     sessionHours: Number(settingsForm.sessionHours.value) || 8,
     enableOtp: settingsForm.enableOtp.checked,
     enableWebAuthn: settingsForm.enableWebAuthn.checked,
-    allowedGroupDns,
     adminGroupDns
   };
 
   try {
     await postJson('/admin/api/settings/site', payload);
     await postJson('/admin/api/settings/auth', {
-      allowedGroupDns: payload.allowedGroupDns,
       adminGroupDns: payload.adminGroupDns
     });
     showAlert('Settings saved.', 'is-success');
@@ -324,13 +405,7 @@ userSearchButton.addEventListener('click', (event) => {
   loadUsers(userQueryInput.value.trim());
 });
 
-// Group management
-const allowedGroupSearch = document.getElementById('allowed-group-search');
-const allowedGroupSelect = document.getElementById('allowed-group-select');
-const allowedGroupAddBtn = document.getElementById('allowed-group-add');
-const allowedGroupsList = document.getElementById('allowed-groups-list');
-let allowedGroups = [];
-
+// Group management (Admin groups only - resource groups are configured per-resource)
 const adminGroupSearch = document.getElementById('admin-group-search');
 const adminGroupSelect = document.getElementById('admin-group-select');
 const adminGroupAddBtn = document.getElementById('admin-group-add');
@@ -405,10 +480,7 @@ function renderGroupList(groups, listElement, type) {
 }
 
 function updateGroupHiddenInput(type) {
-  if (type === 'allowed') {
-    const hiddenInput = document.getElementById('allowedGroupDns');
-    hiddenInput.value = JSON.stringify(allowedGroups.map((g) => g.dn));
-  } else if (type === 'admin') {
+  if (type === 'admin') {
     const hiddenInput = document.getElementById('adminGroupDns');
     hiddenInput.value = JSON.stringify(adminGroups.map((g) => g.dn));
   }
@@ -416,15 +488,7 @@ function updateGroupHiddenInput(type) {
 
 function addGroupToList(dn, name, type) {
   const group = { dn, name };
-  if (type === 'allowed') {
-    if (!allowedGroups.find((g) => g.dn === dn)) {
-      allowedGroups.push(group);
-      renderGroupList(allowedGroups, allowedGroupsList, 'allowed');
-      updateGroupHiddenInput('allowed');
-      allowedGroupSelect.value = '';
-      allowedGroupSearch.value = '';
-    }
-  } else if (type === 'admin') {
+  if (type === 'admin') {
     if (!adminGroups.find((g) => g.dn === dn)) {
       adminGroups.push(group);
       renderGroupList(adminGroups, adminGroupsList, 'admin');
@@ -434,22 +498,6 @@ function addGroupToList(dn, name, type) {
     }
   }
 }
-
-// Allowed groups
-allowedGroupSearch.addEventListener('input', (e) => {
-  clearTimeout(groupSearchTimeout);
-  const query = e.target.value.trim();
-  groupSearchTimeout = setTimeout(() => {
-    searchGroups(query, allowedGroupSelect);
-  }, 300);
-});
-
-allowedGroupAddBtn.addEventListener('click', () => {
-  const selectedOption = allowedGroupSelect.options[allowedGroupSelect.selectedIndex];
-  if (selectedOption && selectedOption.value) {
-    addGroupToList(selectedOption.value, selectedOption.dataset.name || selectedOption.textContent, 'allowed');
-  }
-});
 
 // Admin groups
 adminGroupSearch.addEventListener('input', (e) => {
@@ -469,13 +517,7 @@ adminGroupAddBtn.addEventListener('click', () => {
 
 async function loadGroupsFromSettings() {
   if (settings && settings.auth) {
-    // Load allowed groups
-    const allowedDns = settings.auth.allowedGroupDns || [];
-    allowedGroups = allowedDns.map((dn) => ({ dn, name: dn }));
-    renderGroupList(allowedGroups, allowedGroupsList, 'allowed');
-    updateGroupHiddenInput('allowed');
-    
-    // Load admin groups
+    // Load admin groups (allowed groups are now configured per-resource)
     const adminDns = settings.auth.adminGroupDns || [];
     adminGroups = adminDns.map((dn) => ({ dn, name: dn }));
     renderGroupList(adminGroups, adminGroupsList, 'admin');

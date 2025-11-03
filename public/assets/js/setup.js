@@ -159,7 +159,7 @@ function applyStatus(status, { updateForms = false } = {}) {
     ldapForm.lookupUser.value = status.auth.lookupUser || '';
     ldapForm.sessionAttribute.value = status.auth.sessionAttribute || 'gateProxySession';
     ldapForm.webAuthnAttribute.value = status.auth.webAuthnAttribute || 'gateProxyWebAuthn';
-    ldapForm.allowedGroupDns.value = (status.auth.allowedGroupDns || []).join('\n');
+    // allowedGroupDns removed - access control is now per-resource
     // Admin groups - Domain Admins is set as default on the server
     setupState.ldap = { ...status.auth };
   }
@@ -264,9 +264,7 @@ ldapForm.addEventListener('submit', async (event) => {
   const form = event.target;
   const payload = serializeForm(form);
   payload.useLdaps = !!payload.useLdaps;
-  payload.allowedGroupDns = payload.allowedGroupDns
-    ? payload.allowedGroupDns.split('\n').map((s) => s.trim()).filter(Boolean)
-    : [];
+  // allowedGroupDns removed - access control is now per-resource
   // Admin groups - Domain Admins will be set as default on the server if not provided
   payload.adminGroupDns = [];
 

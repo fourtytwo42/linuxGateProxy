@@ -75,18 +75,3 @@ export function requireAdmin(req, res, next) {
   return res.status(403).send('Forbidden');
 }
 
-export function ensureGroupAccess(req, res, next) {
-  const config = loadConfig();
-  const allowedGroups = config.auth.allowedGroupDns || [];
-  if (allowedGroups.length === 0) {
-    return next();
-  }
-  if (!req.auth?.user) {
-    return res.status(401).json({ error: 'Authentication required' });
-  }
-  if (userHasGroup(req.auth.user, allowedGroups)) {
-    return next();
-  }
-  return res.status(403).json({ error: 'Access denied' });
-}
-
