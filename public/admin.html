@@ -73,13 +73,45 @@
                     <div class="column">
                       <div class="field">
                         <label class="label">Allowed Group DNs</label>
-                        <textarea class="textarea" name="allowedGroupDns"></textarea>
+                        <div class="field has-addons">
+                          <div class="control is-expanded">
+                            <div class="select is-fullwidth">
+                              <select id="allowed-group-select" style="width: 100%;">
+                                <option value="">Search for a group...</option>
+                              </select>
+                            </div>
+                          </div>
+                          <div class="control">
+                            <button class="button is-link" type="button" id="allowed-group-add">Add</button>
+                          </div>
+                        </div>
+                        <input type="text" class="input mt-2" id="allowed-group-search" placeholder="Type to search groups..." />
+                        <div id="allowed-groups-list" class="mt-3">
+                          <!-- Selected groups will appear here -->
+                        </div>
+                        <input type="hidden" name="allowedGroupDns" id="allowedGroupDns" />
                       </div>
                     </div>
                     <div class="column">
                       <div class="field">
                         <label class="label">Admin Group DNs</label>
-                        <textarea class="textarea" name="adminGroupDns"></textarea>
+                        <div class="field has-addons">
+                          <div class="control is-expanded">
+                            <div class="select is-fullwidth">
+                              <select id="admin-group-select" style="width: 100%;">
+                                <option value="">Search for a group...</option>
+                              </select>
+                            </div>
+                          </div>
+                          <div class="control">
+                            <button class="button is-link" type="button" id="admin-group-add">Add</button>
+                          </div>
+                        </div>
+                        <input type="text" class="input mt-2" id="admin-group-search" placeholder="Type to search groups..." />
+                        <div id="admin-groups-list" class="mt-3">
+                          <!-- Selected groups will appear here -->
+                        </div>
+                        <input type="hidden" name="adminGroupDns" id="adminGroupDns" />
                       </div>
                     </div>
                   </div>
@@ -176,6 +208,47 @@
           <button class="button is-warning" id="user-reset-webauthn">Clear WebAuthn</button>
           <button class="button is-warning" id="user-unlock">Unlock</button>
           <button class="button is-danger" id="user-disable">Disable</button>
+        </footer>
+      </div>
+    </div>
+
+    <div class="modal" id="resource-modal">
+      <div class="modal-background"></div>
+      <div class="modal-card">
+        <header class="modal-card-head">
+          <p class="modal-card-title">Add Protected Resource</p>
+          <button class="delete" aria-label="close"></button>
+        </header>
+        <section class="modal-card-body">
+          <form id="resource-form">
+            <div class="field">
+              <label class="label">Resource Name</label>
+              <input class="input" name="name" type="text" placeholder="e.g. Sora Toolbox" required />
+            </div>
+            <div class="field">
+              <label class="label">Target URL</label>
+              <input class="input" name="target_url" type="url" placeholder="http://10.0.0.5:9443" required />
+              <p class="help">The internal URL of the resource to proxy</p>
+            </div>
+            <div class="field">
+              <label class="label">Description</label>
+              <textarea class="textarea" name="description" placeholder="Optional description"></textarea>
+            </div>
+            <div class="field">
+              <label class="label">Icon URL</label>
+              <input class="input" name="icon" type="url" placeholder="https://example.com/icon.png" />
+              <p class="help">Optional icon URL for the landing page</p>
+            </div>
+            <div class="field">
+              <label class="label">Required Group DN</label>
+              <input class="input" name="required_group" type="text" placeholder="CN=Users,DC=example,DC=com" />
+              <p class="help">Optional: Only users in this group can access this resource</p>
+            </div>
+          </form>
+        </section>
+        <footer class="modal-card-foot">
+          <button class="button is-link" id="resource-save">Add Resource</button>
+          <button class="button" id="resource-cancel">Cancel</button>
         </footer>
       </div>
     </div>

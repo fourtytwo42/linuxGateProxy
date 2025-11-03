@@ -71,6 +71,9 @@ router.post('/api/setup/ldap', async (req, res, next) => {
 
     const existingAuth = loadConfig().auth;
 
+    // Default to "Domain Admins" if no admin groups are specified
+    const defaultAdminGroups = adminGroupDns.length ? adminGroupDns : (existingAuth.adminGroupDns?.length ? existingAuth.adminGroupDns : ['Domain Admins']);
+
     saveConfigSection('auth', {
       ...existingAuth,
       domain,
@@ -82,7 +85,7 @@ router.post('/api/setup/ldap', async (req, res, next) => {
       sessionAttribute: sessionAttribute || 'gateProxySession',
       webAuthnAttribute: webAuthnAttribute || 'gateProxyWebAuthn',
       allowedGroupDns: allowedGroupDns.length ? allowedGroupDns : existingAuth.allowedGroupDns,
-      adminGroupDns: adminGroupDns.length ? adminGroupDns : existingAuth.adminGroupDns
+      adminGroupDns: defaultAdminGroups
     });
 
     setBindPassword(password);

@@ -117,8 +117,8 @@ function populateSettingsForm() {
   settingsForm.sessionHours.value = settings.site.sessionHours || 8;
   settingsForm.enableOtp.checked = settings.site.enableOtp;
   settingsForm.enableWebAuthn.checked = settings.site.enableWebAuthn;
-  settingsForm.allowedGroupDns.value = (settings.auth.allowedGroupDns || []).join('\n');
-  settingsForm.adminGroupDns.value = (settings.auth.adminGroupDns || []).join('\n');
+  // Groups are loaded separately via loadGroupsFromSettings()
+  loadGroupsFromSettings();
 }
 
 function renderResources() {
@@ -147,23 +147,53 @@ function renderResources() {
   });
 }
 
-resourceAddButton.addEventListener('click', async () => {
-  const name = prompt('Resource name');
-  if (!name) return;
-  const target = prompt('Target URL (e.g. http://10.0.0.5:9443)');
-  if (!target) return;
-  const group = prompt('Required group DN (optional)');
+const resourceModal = document.getElementById('resource-modal');
+const resourceForm = document.getElementById('resource-form');
+const resourceSaveButton = document.getElementById('resource-save');
+const resourceCancelButton = document.getElementById('resource-cancel');
+
+// Open resource modal
+resourceAddButton.addEventListener('click', () => {
+  resourceForm.reset();
+  resourceModal.classList.add('is-active');
+});
+
+// Close resource modal
+resourceModal.querySelector('.modal-background').addEventListener('click', () => {
+  resourceModal.classList.remove('is-active');
+});
+resourceModal.querySelector('.delete').addEventListener('click', () => {
+  resourceModal.classList.remove('is-active');
+});
+resourceCancelButton.addEventListener('click', () => {
+  resourceModal.classList.remove('is-active');
+});
+
+// Save resource
+resourceSaveButton.addEventListener('click', async () => {
+  if (!resourceForm.checkValidity()) {
+    resourceForm.reportValidity();
+    return;
+  }
+  
+  const formData = new FormData(resourceForm);
+  const payload = {
+    id: generateId(),
+    name: formData.get('name'),
+    target_url: formData.get('target_url'),
+    description: formData.get('description') || '',
+    icon: formData.get('icon') || '',
+    required_group: formData.get('required_group') || null
+  };
+  
   try {
-    const payload = {
-      id: generateId(),
-      name,
-      target_url: target,
-      required_group: group
-    };
     await postJson('/admin/api/resources', payload);
     resources.push(payload);
     renderResources();
     renderStatusCards();
+    resourceModal.classList.remove('is-active');
+    resourceForm.reset();
+    clearAlert();
   } catch (error) {
     showAlert(error.message);
   }
@@ -172,13 +202,19 @@ resourceAddButton.addEventListener('click', async () => {
 settingsForm.addEventListener('submit', async (event) => {
   event.preventDefault();
   clearAlert();
+  // Read groups from hidden inputs (JSON arrays)
+  const allowedGroupDnsInput = document.getElementById('allowedGroupDns');
+  const adminGroupDnsInput = document.getElementById('adminGroupDns');
+  const allowedGroupDns = allowedGroupDnsInput.value ? JSON.parse(allowedGroupDnsInput.value) : [];
+  const adminGroupDns = adminGroupDnsInput.value ? JSON.parse(adminGroupDnsInput.value) : [];
+  
   const payload = {
     publicBaseUrl: settingsForm.publicBaseUrl.value,
     sessionHours: Number(settingsForm.sessionHours.value) || 8,
     enableOtp: settingsForm.enableOtp.checked,
     enableWebAuthn: settingsForm.enableWebAuthn.checked,
-    allowedGroupDns: settingsForm.allowedGroupDns.value.split('\n').map((s) => s.trim()).filter(Boolean),
-    adminGroupDns: settingsForm.adminGroupDns.value.split('\n').map((s) => s.trim()).filter(Boolean)
+    allowedGroupDns,
+    adminGroupDns
   };
 
   try {
@@ -287,6 +323,165 @@ userSearchButton.addEventListener('click', (event) => {
   event.preventDefault();
   loadUsers(userQueryInput.value.trim());
 });
+
+// Group management
+const allowedGroupSearch = document.getElementById('allowed-group-search');
+const allowedGroupSelect = document.getElementById('allowed-group-select');
+const allowedGroupAddBtn = document.getElementById('allowed-group-add');
+const allowedGroupsList = document.getElementById('allowed-groups-list');
+let allowedGroups = [];
+
+const adminGroupSearch = document.getElementById('admin-group-search');
+const adminGroupSelect = document.getElementById('admin-group-select');
+const adminGroupAddBtn = document.getElementById('admin-group-add');
+const adminGroupsList = document.getElementById('admin-groups-list');
+let adminGroups = [];
+
+let groupSearchTimeout = null;
+
+async function searchGroups(query, selectElement) {
+  if (!query || query.length < 2) {
+    selectElement.innerHTML = '<option value="">Type at least 2 characters to search...</option>';
+    return;
+  }
+  
+  try {
+    const response = await fetch(`/admin/api/groups?query=${encodeURIComponent(query)}&size=20`);
+    const data = await response.json();
+    
+    if (!data.groups || data.groups.length === 0) {
+      selectElement.innerHTML = '<option value="">No groups found</option>';
+      return;
+    }
+    
+    selectElement.innerHTML = '<option value="">Select a group...</option>';
+    data.groups.forEach((group) => {
+      const dn = group.distinguishedName || group.dn || '';
+      const name = group.cn || group.name || group.sAMAccountName || dn;
+      const option = document.createElement('option');
+      option.value = dn;
+      option.textContent = name;
+      option.dataset.name = name;
+      selectElement.appendChild(option);
+    });
+  } catch (error) {
+    console.error('Error searching groups:', error);
+    selectElement.innerHTML = '<option value="">Error searching groups</option>';
+  }
+}
+
+function renderGroupList(groups, listElement, type) {
+  if (!groups || groups.length === 0) {
+    listElement.innerHTML = '<p class="has-text-grey">No groups selected</p>';
+    return;
+  }
+  
+  listElement.innerHTML = '';
+  groups.forEach((group) => {
+    const tag = document.createElement('div');
+    tag.className = 'tags has-addons mb-2';
+    tag.style.marginRight = '0.5rem';
+    
+    const tagLabel = document.createElement('span');
+    tagLabel.className = 'tag is-link';
+    tagLabel.textContent = group.name || group.dn;
+    tagLabel.title = group.dn;
+    
+    const tagDelete = document.createElement('a');
+    tagDelete.className = 'tag is-delete';
+    tagDelete.addEventListener('click', () => {
+      const index = groups.findIndex((g) => g.dn === group.dn);
+      if (index > -1) {
+        groups.splice(index, 1);
+        renderGroupList(groups, listElement, type);
+        updateGroupHiddenInput(type);
+      }
+    });
+    
+    tag.appendChild(tagLabel);
+    tag.appendChild(tagDelete);
+    listElement.appendChild(tag);
+  });
+}
+
+function updateGroupHiddenInput(type) {
+  if (type === 'allowed') {
+    const hiddenInput = document.getElementById('allowedGroupDns');
+    hiddenInput.value = JSON.stringify(allowedGroups.map((g) => g.dn));
+  } else if (type === 'admin') {
+    const hiddenInput = document.getElementById('adminGroupDns');
+    hiddenInput.value = JSON.stringify(adminGroups.map((g) => g.dn));
+  }
+}
+
+function addGroupToList(dn, name, type) {
+  const group = { dn, name };
+  if (type === 'allowed') {
+    if (!allowedGroups.find((g) => g.dn === dn)) {
+      allowedGroups.push(group);
+      renderGroupList(allowedGroups, allowedGroupsList, 'allowed');
+      updateGroupHiddenInput('allowed');
+      allowedGroupSelect.value = '';
+      allowedGroupSearch.value = '';
+    }
+  } else if (type === 'admin') {
+    if (!adminGroups.find((g) => g.dn === dn)) {
+      adminGroups.push(group);
+      renderGroupList(adminGroups, adminGroupsList, 'admin');
+      updateGroupHiddenInput('admin');
+      adminGroupSelect.value = '';
+      adminGroupSearch.value = '';
+    }
+  }
+}
+
+// Allowed groups
+allowedGroupSearch.addEventListener('input', (e) => {
+  clearTimeout(groupSearchTimeout);
+  const query = e.target.value.trim();
+  groupSearchTimeout = setTimeout(() => {
+    searchGroups(query, allowedGroupSelect);
+  }, 300);
+});
+
+allowedGroupAddBtn.addEventListener('click', () => {
+  const selectedOption = allowedGroupSelect.options[allowedGroupSelect.selectedIndex];
+  if (selectedOption && selectedOption.value) {
+    addGroupToList(selectedOption.value, selectedOption.dataset.name || selectedOption.textContent, 'allowed');
+  }
+});
+
+// Admin groups
+adminGroupSearch.addEventListener('input', (e) => {
+  clearTimeout(groupSearchTimeout);
+  const query = e.target.value.trim();
+  groupSearchTimeout = setTimeout(() => {
+    searchGroups(query, adminGroupSelect);
+  }, 300);
+});
+
+adminGroupAddBtn.addEventListener('click', () => {
+  const selectedOption = adminGroupSelect.options[adminGroupSelect.selectedIndex];
+  if (selectedOption && selectedOption.value) {
+    addGroupToList(selectedOption.value, selectedOption.dataset.name || selectedOption.textContent, 'admin');
+  }
+});
+
+async function loadGroupsFromSettings() {
+  if (settings && settings.auth) {
+    // Load allowed groups
+    const allowedDns = settings.auth.allowedGroupDns || [];
+    allowedGroups = allowedDns.map((dn) => ({ dn, name: dn }));
+    renderGroupList(allowedGroups, allowedGroupsList, 'allowed');
+    updateGroupHiddenInput('allowed');
+    
+    // Load admin groups
+    const adminDns = settings.auth.adminGroupDns || [];
+    adminGroups = adminDns.map((dn) => ({ dn, name: dn }));
+    renderGroupList(adminGroups, adminGroupsList, 'admin');
+    updateGroupHiddenInput('admin');
+  }
+}
 
 async function bootstrap() {
   try {

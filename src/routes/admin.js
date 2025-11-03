@@ -3,6 +3,7 @@ import path from 'path';
 import { loadConfig, saveConfigSection, upsertResource, listResources, deleteResource } from '../config/index.js';
 import {
   searchUsers,
+  searchGroups,
   findUser,
   updateContactInfo,
   resetPassword,
@@ -93,6 +94,16 @@ router.get('/admin/api/users', requireAdmin, async (req, res, next) => {
     const { query = '', page = 1, size = 25 } = req.query;
     const users = await searchUsers({ query, page: Number(page), size: Number(size) });
     res.json({ users });
+  } catch (error) {
+    next(error);
+  }
+});
+
+router.get('/admin/api/groups', requireAdmin, async (req, res, next) => {
+  try {
+    const { query = '', page = 1, size = 50 } = req.query;
+    const groups = await searchGroups({ query, page: Number(page), size: Number(size) });
+    res.json({ groups });
   } catch (error) {
     next(error);
   }

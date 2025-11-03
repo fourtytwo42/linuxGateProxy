@@ -396,9 +396,11 @@ export async function enableAccount(userDn) {
 export async function searchUsers({ query, size = 25, page = 1 }) {
   return withServiceClient(async (client, config) => {
     const filterValue = escapeFilterValue(query || '*');
+    // Filter out computer objects - they also have objectClass=user but we only want actual users
+    const baseFilter = '(&(objectClass=user)(!(objectClass=computer)))';
     const filter = query
-      ? `(|(sAMAccountName=${filterValue})(displayName=${filterValue}*)(mail=${filterValue}*))`
-      : '(objectClass=user)';
+      ? `(&${baseFilter}(|(sAMAccountName=${filterValue})(displayName=${filterValue}*)(mail=${filterValue}*)))`
+      : baseFilter;
 
     const result = await client.search(config.auth.baseDn, {
       scope: 'sub',
@@ -409,6 +411,29 @@ export async function searchUsers({ query, size = 25, page = 1 }) {
         page
       },
       attributes: ['distinguishedName', 'displayName', 'sAMAccountName', 'mail', 'userAccountControl']
+    });
+    return result.searchEntries;
+  });
+}
+
+export async function searchGroups({ query, size = 50, page = 1 }) {
+  return withServiceClient(async (client, config) => {
+    const filterValue = escapeFilterValue(query || '*');
+    // Search for groups - most common objectClass is 'group'
+    const baseFilter = '(objectClass=group)';
+    const filter = query
+      ? `(&${baseFilter}(|(cn=${filterValue}*)(name=${filterValue}*)(sAMAccountName=${filterValue}*)(distinguishedName=${filterValue}*)))`
+      : baseFilter;
+
+    const result = await client.search(config.auth.baseDn, {
+      scope: 'sub',
+      filter,
+      sizeLimit: size,
+      paged: {
+        pageSize: size,
+        page
+      },
+      attributes: ['distinguishedName', 'cn', 'name', 'sAMAccountName', 'description']
     });
     return result.searchEntries;
   });

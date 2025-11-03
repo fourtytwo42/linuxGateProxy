@@ -160,7 +160,7 @@ function applyStatus(status, { updateForms = false } = {}) {
     ldapForm.sessionAttribute.value = status.auth.sessionAttribute || 'gateProxySession';
     ldapForm.webAuthnAttribute.value = status.auth.webAuthnAttribute || 'gateProxyWebAuthn';
     ldapForm.allowedGroupDns.value = (status.auth.allowedGroupDns || []).join('\n');
-    ldapForm.adminGroupDns.value = (status.auth.adminGroupDns || []).join('\n');
+    // Admin groups - Domain Admins is set as default on the server
     setupState.ldap = { ...status.auth };
   }
   if (status.site) {
@@ -267,9 +267,8 @@ ldapForm.addEventListener('submit', async (event) => {
   payload.allowedGroupDns = payload.allowedGroupDns
     ? payload.allowedGroupDns.split('\n').map((s) => s.trim()).filter(Boolean)
     : [];
-  payload.adminGroupDns = payload.adminGroupDns
-    ? payload.adminGroupDns.split('\n').map((s) => s.trim()).filter(Boolean)
-    : [];
+  // Admin groups - Domain Admins will be set as default on the server if not provided
+  payload.adminGroupDns = [];
 
   try {
     await postJson('/api/setup/ldap', payload);
