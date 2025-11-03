@@ -34,6 +34,13 @@ export const logger = {
   },
   error(message, meta) {
     write('error', message, meta);
+  },
+  debug(message, meta) {
+    // In development mode, debug logs are shown as info
+    // In production, they could be filtered out
+    if (process.env.NODE_ENV === 'development') {
+      write('debug', message, meta);
+    }
   }
 };
 
