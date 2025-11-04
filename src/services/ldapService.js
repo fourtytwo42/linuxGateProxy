@@ -397,7 +397,8 @@ export async function searchUsers({ query, size = 25, page = 1 }) {
   return withServiceClient(async (client, config) => {
     const filterValue = escapeFilterValue(query || '*');
     // Filter out computer objects - they also have objectClass=user but we only want actual users
-    const baseFilter = '(&(objectClass=user)(!(objectClass=computer)))';
+    // Also filter out built-in accounts: Guest, Administrator, krbtgt, and accounts starting with $ (service/computer accounts)
+    const baseFilter = '(&(objectClass=user)(!(objectClass=computer))(!(sAMAccountName=Guest))(!(sAMAccountName=Administrator))(!(sAMAccountName=krbtgt))(!(sAMAccountName=$*)))';
     const filter = query
       ? `(&${baseFilter}(|(sAMAccountName=${filterValue})(displayName=${filterValue}*)(mail=${filterValue}*)))`
       : baseFilter;
@@ -412,7 +413,18 @@ export async function searchUsers({ query, size = 25, page = 1 }) {
       },
       attributes: ['distinguishedName', 'displayName', 'sAMAccountName', 'mail', 'userAccountControl']
     });
-    return result.searchEntries;
+    
+    // Additional safety filter: filter out any accounts that might have slipped through
+    // (e.g., if LDAP filter doesn't support wildcards in certain contexts)
+    const filteredEntries = result.searchEntries.filter((entry) => {
+      const sam = entry.sAMAccountName || '';
+      return sam !== 'Guest' && 
+             sam !== 'Administrator' && 
+             sam !== 'krbtgt' && 
+             !sam.startsWith('$');
+    });
+    
+    return filteredEntries;
   });
 }
 
