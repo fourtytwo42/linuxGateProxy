@@ -398,9 +398,18 @@ function renderUserTable() {
 function renderStatusCards() {
   if (!settings || !statusCards) return;
   statusCards.innerHTML = '';
-  const tunnelStatus = settings.cloudflare?.isLinked
-    ? (settings.cloudflare.tunnelName ? `Linked (${settings.cloudflare.tunnelName})` : 'Linked')
-    : 'Unlinked';
+  let tunnelStatus = 'Unlinked';
+  if (settings.cloudflare?.isLinked) {
+    if (settings.cloudflare?.status) {
+      const statusColor = settings.cloudflare.status === 'UP' ? 'success' : 
+                         settings.cloudflare.status === 'DOWN' ? 'danger' : 'warning';
+      tunnelStatus = `${settings.cloudflare.status} (${settings.cloudflare.tunnelName || 'Unknown'})`;
+    } else if (settings.cloudflare.tunnelName) {
+      tunnelStatus = `Linked (${settings.cloudflare.tunnelName})`;
+    } else {
+      tunnelStatus = 'Linked';
+    }
+  }
 
   const certStatus = settings.certificate || {};
   const certStatusText = certStatus.hasCertificate
@@ -877,30 +886,81 @@ importSettingsFile?.addEventListener('change', async (event) => {
 
 async function updateTunnelStatus() {
   try {
-    const tunnels = await getJson('/gateProxyAdmin/api/cloudflare/tunnels');
     const statusEl = document.getElementById('tunnel-status');
-    if (statusEl) {
+    if (!statusEl) return;
+    
+    try {
+      const tunnelStatus = await getJson('/gateProxyAdmin/api/cloudflare/status');
+      let statusText = '';
+      
+      if (tunnelStatus.status === 'NOT_CONFIGURED') {
+        statusText = 'Not configured';
+      } else if (tunnelStatus.status === 'NOT_AUTHENTICATED') {
+        statusText = 'Not authenticated';
+      } else if (tunnelStatus.status) {
+        statusText = `${tunnelStatus.status} (${tunnelStatus.name || tunnelStatus.id || 'Unknown'})`;
+        if (tunnelStatus.connectors && tunnelStatus.connectors.length > 0) {
+          const activeConnectors = tunnelStatus.connectors.filter(c => 
+            c.status === 'connected' || c.status === 'healthy'
+          ).length;
+          statusText += ` • ${activeConnectors}/${tunnelStatus.connectors.length} connectors`;
+        }
+      } else {
+        statusText = settings?.cloudflare?.tunnelName || 'Unknown';
+      }
+      
+      statusEl.textContent = statusText;
+      
+      // Update settings object with latest status
+      if (settings?.cloudflare) {
+        settings.cloudflare.status = tunnelStatus.status;
+        settings.cloudflare.tunnelId = tunnelStatus.id;
+        settings.cloudflare.connectors = tunnelStatus.connectors || [];
+      }
+    } catch (error) {
+      // Fallback to basic status
       statusEl.textContent = settings?.cloudflare?.isLinked
         ? (settings.cloudflare.tunnelName ? `Linked (${settings.cloudflare.tunnelName})` : 'Linked')
         : 'Unlinked';
-      if (!settings?.cloudflare?.isLinked && tunnels?.tunnels?.length) {
-        statusEl.textContent += ` • ${tunnels.tunnels.length} available`;
-      }
+      console.warn('Failed to fetch tunnel status:', error);
+    }
+  } catch (error) {
+    console.error('Error updating tunnel status:', error);
+  }
+}
+
+// Auto-detect tunnel button
+const autoDetectTunnelButton = document.getElementById('auto-detect-tunnel-button');
+autoDetectTunnelButton?.addEventListener('click', async () => {
+  try {
+    autoDetectTunnelButton.disabled = true;
+    autoDetectTunnelButton.textContent = 'Detecting...';
+    
+    const result = await postJson('/gateProxyAdmin/api/cloudflare/auto-detect', {});
+    
+    if (result.success) {
+      showAlert(`Tunnel "${result.tunnel.name}" auto-detected and connected successfully!`, 'success');
+      await loadSettings();
+      await updateTunnelStatus();
     }
   } catch (error) {
     showAlert(error.message);
+  } finally {
+    autoDetectTunnelButton.disabled = false;
+    autoDetectTunnelButton.textContent = 'Auto-detect tunnel';
   }
-}
+});
 
 connectTunnelButton?.addEventListener('click', async () => {
   try {
     const data = await getJson('/gateProxyAdmin/api/cloudflare/tunnels');
-    const tunnelNames = data.tunnels?.map((tunnel) => tunnel.name)?.join('\n') || 'No tunnels available';
+    const tunnelNames = data.tunnels?.map((tunnel) => tunnel.name || tunnel.id)?.join('\n') || 'No tunnels available';
     const selected = prompt(`Enter the name or ID of the tunnel to link:\n${tunnelNames}`);
     if (!selected) return;
-    await postJson('/gateProxyAdmin/api/cloudflare/connect', { tunnel: selected });
+    await postJson('/gateProxyAdmin/api/cloudflare/connect', { tunnelName: selected });
     showAlert('Cloudflare tunnel linked.', 'success');
     await loadSettings();
+    await updateTunnelStatus();
   } catch (error) {
     showAlert(error.message);
   }
@@ -941,6 +1001,13 @@ async function initialize() {
   setupNavigation();
   await Promise.all([loadSettings(), loadResources(), loadUsers()]);
   switchView('dashboard');
+  
+  // Set up periodic tunnel status updates (every 30 seconds)
+  setInterval(() => {
+    if (settings?.cloudflare?.isLinked) {
+      updateTunnelStatus().catch(err => console.warn('Failed to update tunnel status:', err));
+    }
+  }, 30000);
 }
 
 // Wait for DOM to be ready

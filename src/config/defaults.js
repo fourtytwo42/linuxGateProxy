@@ -42,7 +42,7 @@ export const defaultSettings = {
     replyTo: ''
   },
   cloudflare: {
-    tunnelName: 'linuxGateProxy',
+    tunnelName: '',
     credentialFile: '',
     accountTag: '',
     certPem: ''

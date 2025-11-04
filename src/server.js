@@ -10,7 +10,7 @@ import { execFileSync } from 'child_process';
 import { ensureDirSync } from './utils/fs.js';
 import { dataDir, runtimeDir, tempDir, shareDir, publicDir, projectRoot } from './utils/paths.js';
 import fs from 'fs';
-import { loadConfig, listResources } from './config/index.js';
+import { loadConfig, listResources, saveConfigSection } from './config/index.js';
 import { authenticate, requireAuth } from './middleware/auth.js';
 import { setupRouter } from './routes/setup.js';
 import { authRouter } from './routes/auth.js';
@@ -20,6 +20,7 @@ import { handleProxy, upgradeProxy } from './services/proxyService.js';
 import * as certService from './services/certService.js';
 import { purgeExpiredOtps } from './services/otpService.js';
 import { logger } from './utils/logger.js';
+import { runTunnel, stopTunnel, hasCertificate, autoDetectTunnel, getTunnelToken } from './services/cloudflareService.js';
 
 const scriptsDir = path.join(projectRoot, 'scripts');
 
@@ -357,6 +358,56 @@ async function startServer() {
 
   server.listen(endpoint.port, endpoint.address, () => {
     logger.info('Server listening', { listenAddress: endpoint.address, listenPort: endpoint.port });
+    
+    // Start Cloudflare tunnel if configured or auto-detect
+    (async () => {
+      try {
+        const config = loadConfig();
+        let tunnelName = config.cloudflare?.tunnelName;
+        
+        // If no tunnel configured and certificate exists, try auto-detection
+        if ((!tunnelName || tunnelName === 'linuxGateProxy') && hasCertificate()) {
+          logger.info('No tunnel configured, attempting auto-detection...');
+          try {
+            const detected = await autoDetectTunnel();
+            if (detected) {
+              logger.info(`Auto-detected tunnel: ${detected.name} (${detected.id})`);
+              // Get credentials for the tunnel
+              const token = await getTunnelToken(detected.name);
+              // Save the configuration
+              saveConfigSection('cloudflare', {
+                ...config.cloudflare,
+                tunnelName: detected.name,
+                credentialFile: token.credentialFile || '',
+                accountTag: token.AccountTag || '',
+                certPem: token.certPem || ''
+              });
+              tunnelName = detected.name;
+            } else {
+              logger.info('No tunnels found for auto-detection.');
+            }
+          } catch (autoDetectError) {
+            logger.warn('Failed to auto-detect tunnel', { error: autoDetectError.message });
+          }
+        }
+        
+        // Start tunnel if we have a valid tunnel name
+        if (tunnelName && 
+            tunnelName !== 'linuxGateProxy' && 
+            hasCertificate()) {
+          logger.info(`Starting Cloudflare tunnel: ${tunnelName}`);
+          await runTunnel(tunnelName).catch((error) => {
+            logger.warn(`Failed to start Cloudflare tunnel: ${error.message}`);
+          });
+        } else if (!hasCertificate()) {
+          logger.info('Cloudflare certificate not found. Run cloudflared login first or configure via admin panel.');
+        } else {
+          logger.info('No Cloudflare tunnel configured. Configure via admin panel.');
+        }
+      } catch (error) {
+        logger.warn('Error starting Cloudflare tunnel', { error: error.message });
+      }
+    })();
   });
 
   // Start HTTPS server if certificate is available
@@ -409,11 +460,13 @@ async function startServer() {
 
   process.on('SIGINT', () => {
     logger.info('Received SIGINT, shutting down');
+    stopTunnel();
     server.close(() => process.exit(0));
   });
 
   process.on('SIGTERM', () => {
     logger.info('Received SIGTERM, shutting down');
+    stopTunnel();
     server.close(() => process.exit(0));
   });
 }

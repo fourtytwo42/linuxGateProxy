@@ -1,6 +1,7 @@
 import { Router } from 'express';
 import path from 'path';
 import { loadConfig, saveConfigSection, upsertResource, listResources, deleteResource } from '../config/index.js';
+import { logger } from '../utils/logger.js';
 import {
   searchUsers,
   searchGroups,
@@ -17,7 +18,7 @@ import {
 import { requireAdmin } from '../middleware/auth.js';
 import { publicDir } from '../utils/paths.js';
 import { storeSmtpPassword } from '../services/otpService.js';
-import { hasCertificate, listTunnels, getTunnelToken } from '../services/cloudflareService.js';
+import { hasCertificate, listTunnels, getTunnelToken, runTunnel, stopTunnel, isTunnelRunning, getTunnelInfo, autoDetectTunnel } from '../services/cloudflareService.js';
 import { getCertificateStatus, requestCertificate } from '../services/certService.js';
 
 const router = Router();
@@ -98,6 +99,23 @@ router.get('/gateProxyAdmin/api/session', requireAdmin, (req, res) => {
 router.get('/gateProxyAdmin/api/settings', requireAdmin, async (req, res) => {
   const config = loadConfig();
   const certStatus = await getCertificateStatus();
+  
+  // Get tunnel status from Cloudflare
+  let tunnelStatus = null;
+  if (config.cloudflare?.tunnelName && hasCertificate()) {
+    try {
+      tunnelStatus = await getTunnelInfo(config.cloudflare.tunnelName);
+    } catch (error) {
+      logger.warn('Failed to get tunnel status from Cloudflare', { error: error.message });
+      tunnelStatus = {
+        id: config.cloudflare.tunnelName,
+        name: config.cloudflare.tunnelName,
+        status: 'UNKNOWN',
+        error: error.message
+      };
+    }
+  }
+  
   res.json({
     site: config.site,
     auth: config.auth,
@@ -107,7 +125,11 @@ router.get('/gateProxyAdmin/api/settings', requireAdmin, async (req, res) => {
     cloudflare: {
       tunnelName: config.cloudflare.tunnelName,
       credentialFile: config.cloudflare.credentialFile,
-      isLinked: hasCertificate()
+      isLinked: hasCertificate(),
+      isRunning: isTunnelRunning(),
+      status: tunnelStatus?.status || null,
+      tunnelId: tunnelStatus?.id || null,
+      connectors: tunnelStatus?.connectors || []
     },
     certificate: certStatus
   });
@@ -397,6 +419,99 @@ router.get('/gateProxyAdmin/api/cloudflare/tunnels', requireAdmin, async (req, r
   }
 });
 
+router.get('/gateProxyAdmin/api/cloudflare/status', requireAdmin, async (req, res, next) => {
+  try {
+    const config = loadConfig();
+    const tunnelName = config.cloudflare?.tunnelName;
+    
+    if (!tunnelName) {
+      return res.json({ 
+        status: 'NOT_CONFIGURED',
+        message: 'No tunnel configured',
+        isRunning: false
+      });
+    }
+    
+    if (!hasCertificate()) {
+      return res.json({
+        status: 'NOT_AUTHENTICATED',
+        message: 'Cloudflare certificate not found',
+        isRunning: false
+      });
+    }
+
+    try {
+      const tunnelInfo = await getTunnelInfo(tunnelName);
+      res.json({
+        ...tunnelInfo,
+        isRunning: isTunnelRunning(),
+        localProcessRunning: isTunnelRunning()
+      });
+    } catch (error) {
+      res.json({
+        id: tunnelName,
+        name: tunnelName,
+        status: 'UNKNOWN',
+        error: error.message,
+        isRunning: isTunnelRunning(),
+        localProcessRunning: isTunnelRunning()
+      });
+    }
+  } catch (error) {
+    next(error);
+  }
+});
+
+// Auto-detect tunnel endpoint
+router.post('/gateProxyAdmin/api/cloudflare/auto-detect', requireAdmin, async (req, res, next) => {
+  try {
+    if (!hasCertificate()) {
+      return res.status(400).json({ error: 'Cloudflare certificate not found. Please login first.' });
+    }
+
+    const tunnel = await autoDetectTunnel();
+    
+    if (!tunnel) {
+      return res.status(404).json({ error: 'No tunnels found. Please create a tunnel first.' });
+    }
+
+    // Automatically connect to the detected tunnel
+    const token = await getTunnelToken(tunnel.name);
+    
+    // Save tunnel configuration
+    const config = loadConfig();
+    saveConfigSection('cloudflare', {
+      ...config.cloudflare,
+      tunnelName: tunnel.name,
+      credentialFile: token.credentialFile || '',
+      accountTag: token.AccountTag || '',
+      certPem: token.certPem || ''
+    });
+
+    // Start the tunnel
+    try {
+      await runTunnel(tunnel.name);
+      logger.info(`Cloudflare tunnel ${tunnel.name} auto-detected and started successfully`);
+    } catch (tunnelError) {
+      logger.error(`Failed to start tunnel: ${tunnelError.message}`);
+      // Don't fail the request - tunnel might still work if started manually
+    }
+
+    res.json({ 
+      success: true, 
+      tunnel: { 
+        id: tunnel.id,
+        name: tunnel.name, 
+        ...token 
+      }, 
+      running: isTunnelRunning(),
+      autoDetected: true
+    });
+  } catch (error) {
+    next(error);
+  }
+});
+
 router.post('/gateProxyAdmin/api/cloudflare/connect', requireAdmin, async (req, res, next) => {
   try {
     const { tunnelName } = req.body;
@@ -418,7 +533,57 @@ router.post('/gateProxyAdmin/api/cloudflare/connect', requireAdmin, async (req, 
       certPem: token.certPem || ''
     });
 
-    res.json({ success: true, tunnel: { name: tunnelName, ...token } });
+    // Start the tunnel
+    try {
+      await runTunnel(tunnelName);
+      logger.info(`Cloudflare tunnel ${tunnelName} started successfully`);
+    } catch (tunnelError) {
+      logger.error(`Failed to start tunnel: ${tunnelError.message}`);
+      // Don't fail the request - tunnel might still work if started manually
+    }
+
+    res.json({ success: true, tunnel: { name: tunnelName, ...token }, running: isTunnelRunning() });
+  } catch (error) {
+    next(error);
+  }
+});
+
+router.post('/gateProxyAdmin/api/cloudflare/start', requireAdmin, async (req, res, next) => {
+  try {
+    const config = loadConfig();
+    const tunnelName = config.cloudflare?.tunnelName;
+    
+    if (!tunnelName) {
+      return res.status(400).json({ error: 'No tunnel configured. Please connect to a tunnel first.' });
+    }
+    
+    if (!hasCertificate()) {
+      return res.status(400).json({ error: 'Cloudflare certificate not found. Please login first.' });
+    }
+
+    if (isTunnelRunning()) {
+      return res.json({ success: true, message: 'Tunnel is already running', running: true });
+    }
+
+    await runTunnel(tunnelName);
+    logger.info(`Cloudflare tunnel ${tunnelName} started successfully`);
+    
+    res.json({ success: true, message: 'Tunnel started successfully', running: true });
+  } catch (error) {
+    next(error);
+  }
+});
+
+router.post('/gateProxyAdmin/api/cloudflare/stop', requireAdmin, async (req, res, next) => {
+  try {
+    if (!isTunnelRunning()) {
+      return res.json({ success: true, message: 'Tunnel is not running', running: false });
+    }
+
+    stopTunnel();
+    logger.info('Cloudflare tunnel stopped');
+    
+    res.json({ success: true, message: 'Tunnel stopped successfully', running: false });
   } catch (error) {
     next(error);
   }
