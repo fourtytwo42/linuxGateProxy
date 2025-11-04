@@ -234,41 +234,96 @@
             </form>
             <div id="step-4" class="setup-step">
               <h2 class="title is-4">Setup Scripts</h2>
-              <p class="mb-4">Helper scripts are available via HTTP for download to your domain controller and certificate server.</p>
-              <div class="columns">
+              <p class="mb-4">Download and run these helper scripts on your domain controller and certificate server to complete the integration.</p>
+              
+              <div class="columns mt-5">
                 <div class="column">
                   <div class="box">
-                    <p class="has-text-weight-semibold mb-3">Access Setup Scripts</p>
-                    <p class="mb-3">Scripts are served at:</p>
+                    <h3 class="title is-5 mb-4">1. Domain Controller Setup</h3>
+                    <p class="mb-4">Configures your domain controller for Linux Gate Proxy integration. Creates service account, firewall rules, and DNS records.</p>
+                    
                     <div class="field">
-                      <div class="control">
-                        <input class="input is-family-monospace" id="share-url" type="text" readonly value="http://localhost:5000/share/" />
-                        <button class="button is-small mt-2" id="copy-share-url">Copy URL</button>
+                      <label class="label">Download Scripts:</label>
+                      <div class="buttons">
+                        <a href="/share/configure-domain-controller.bat" class="button is-link is-outlined" download>
+                          <span class="icon"><i class="fas fa-download"></i></span>
+                          <span>configure-domain-controller.bat</span>
+                        </a>
+                        <a href="/share/configure-domain-controller.ps1" class="button is-link is-outlined" download>
+                          <span class="icon"><i class="fas fa-download"></i></span>
+                          <span>configure-domain-controller.ps1</span>
+                        </a>
                       </div>
                     </div>
-                    <p class="mt-4 mb-2"><strong>Available scripts:</strong></p>
-                    <ul>
-                      <li><code>/share/configure-domain-controller.ps1</code></li>
-                      <li><code>/share/configure-certificate-server.ps1</code></li>
-                    </ul>
+
+                    <div class="message is-info mt-4">
+                      <div class="message-body">
+                        <p class="has-text-weight-semibold mb-2">How to Run:</p>
+                        <ol class="ml-4" style="list-style-type: decimal;">
+                          <li class="mb-2">Download both files to your domain controller</li>
+                          <li class="mb-2">Double-click <code>configure-domain-controller.bat</code></li>
+                          <li class="mb-2">The script will automatically request administrator privileges</li>
+                          <li class="mb-2">When prompted, enter the tunnel hostname (e.g., tunnel.yourdomain.com)</li>
+                          <li class="mb-2">Enter the Gate Proxy host IP address</li>
+                          <li>Enter a password for the service account when prompted</li>
+                        </ol>
+                        <p class="mt-3"><strong>Note:</strong> The .bat file automatically runs as administrator. You can also run the .ps1 file directly if you prefer.</p>
+                      </div>
+                    </div>
                   </div>
                 </div>
+
                 <div class="column">
-                  <article class="message is-info">
-                    <div class="message-header">
-                      <p>Download Instructions</p>
+                  <div class="box">
+                    <h3 class="title is-5 mb-4">2. Certificate Server Setup</h3>
+                    <p class="mb-4">Configures your certificate authority to issue WebAuthn certificates for Gate Proxy.</p>
+                    
+                    <div class="field">
+                      <label class="label">Download Scripts:</label>
+                      <div class="buttons">
+                        <a href="/share/configure-certificate-server.bat" class="button is-link is-outlined" download>
+                          <span class="icon"><i class="fas fa-download"></i></span>
+                          <span>configure-certificate-server.bat</span>
+                        </a>
+                        <a href="/share/configure-certificate-server.ps1" class="button is-link is-outlined" download>
+                          <span class="icon"><i class="fas fa-download"></i></span>
+                          <span>configure-certificate-server.ps1</span>
+                        </a>
+                      </div>
                     </div>
-                    <div class="message-body">
-                      <p class="mb-3"><strong>From PowerShell:</strong></p>
-                      <pre class="has-background-black has-text-white-ter p-3 mb-4"><code>Invoke-WebRequest -Uri "http://&lt;server-ip&gt;:5000/share/configure-domain-controller.ps1" -OutFile "configure-domain-controller.ps1"</code></pre>
-                      <p class="mb-3"><strong>From browser:</strong></p>
-                      <p>Navigate to the URL above and download the scripts directly.</p>
-                      <p class="mt-4"><strong>Note:</strong> Replace <code>localhost</code> with your server's IP address when accessing from other machines.</p>
+
+                    <div class="message is-info mt-4">
+                      <div class="message-body">
+                        <p class="has-text-weight-semibold mb-2">How to Run:</p>
+                        <ol class="ml-4" style="list-style-type: decimal;">
+                          <li class="mb-2">Download both files to your certificate server</li>
+                          <li class="mb-2">Double-click <code>configure-certificate-server.bat</code></li>
+                          <li class="mb-2">The script will automatically request administrator privileges</li>
+                          <li class="mb-2">When prompted, enter the external hostname (e.g., sora2jailbreak.com)</li>
+                          <li>The script will create a certificate template and submit a certificate request</li>
+                        </ol>
+                        <p class="mt-3"><strong>Note:</strong> The .bat file automatically runs as administrator. You can also run the .ps1 file directly if you prefer.</p>
+                      </div>
                     </div>
-                  </article>
+                  </div>
                 </div>
               </div>
-              <div class="field is-grouped">
+
+              <article class="message is-warning mt-5">
+                <div class="message-header">
+                  <p>Important Notes</p>
+                </div>
+                <div class="message-body">
+                  <ul class="ml-4">
+                    <li>Replace <code>localhost</code> in URLs above with your server's IP address when accessing from other machines</li>
+                    <li>Both scripts require Active Directory and appropriate server roles to be installed</li>
+                    <li>Ensure your account has the necessary permissions (Domain Admin for DC, CA Admin for Certificate Server)</li>
+                    <li>The scripts will prompt for required information during execution</li>
+                  </ul>
+                </div>
+              </article>
+
+              <div class="field is-grouped mt-5">
                 <div class="control">
                   <button class="button" data-action="prev">Back</button>
                 </div>

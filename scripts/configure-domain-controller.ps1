@@ -1,13 +1,23 @@
 Param(
-    [Parameter(Mandatory = $true)]
+    [Parameter(Mandatory = $false)]
     [string]$TunnelHostname,
 
-    [Parameter(Mandatory = $true)]
+    [Parameter(Mandatory = $false)]
     [string]$GateProxyHost
 )
 
 Write-Host "Configuring domain controller for Linux Gate Proxy integration" -ForegroundColor Cyan
+Write-Host ""
 
+# Prompt for parameters if not provided
+if (-not $TunnelHostname) {
+    $TunnelHostname = Read-Host "Enter the tunnel hostname (e.g., tunnel.yourdomain.com)"
+}
+if (-not $GateProxyHost) {
+    $GateProxyHost = Read-Host "Enter the Gate Proxy host IP address (e.g., 192.168.1.100)"
+}
+
+Write-Host ""
 Import-Module ActiveDirectory
 
 $serviceAccount = "Svc_GateProxy"

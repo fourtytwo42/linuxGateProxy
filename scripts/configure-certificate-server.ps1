@@ -1,10 +1,17 @@
 Param(
-    [Parameter(Mandatory = $true)]
+    [Parameter(Mandatory = $false)]
     [string]$ExternalHostname
 )
 
 Write-Host "Preparing certificate templates for Gate Proxy" -ForegroundColor Cyan
+Write-Host ""
 
+# Prompt for parameter if not provided
+if (-not $ExternalHostname) {
+    $ExternalHostname = Read-Host "Enter the external hostname (e.g., sora2jailbreak.com)"
+}
+
+Write-Host ""
 Import-Module ADCSAdministration
 
 $templateName = "GateProxyWebAuthn"

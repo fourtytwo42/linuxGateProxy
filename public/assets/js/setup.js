@@ -180,10 +180,7 @@ function applyStatus(status, { updateForms = false } = {}) {
     }
     setupState.site = { ...status.site };
   }
-  // Step 4 is now informational - just show the HTTP share URL
-  if (step4Div) {
-    updateShareUrl();
-  }
+  // Step 4 now shows download links directly in the HTML
   resourceList.innerHTML = '';
   if (status.resources?.length) {
     status.resources.forEach((resource) => addResourceRow(resource));
@@ -317,54 +314,7 @@ siteForm.addEventListener('submit', async (event) => {
   }
 });
 
-// Step 4 - Setup Scripts (HTTP file server)
-function updateShareUrl() {
-  const shareUrlInput = document.getElementById('share-url');
-  if (shareUrlInput) {
-    // Use window.location to get the current host and port
-    const protocol = window.location.protocol;
-    const hostname = window.location.hostname;
-    const port = window.location.port || (protocol === 'https:' ? '443' : '80');
-    // For localhost, show localhost; otherwise show the actual hostname/IP
-    const baseUrl = `${protocol}//${hostname}${port && port !== '80' && port !== '443' ? `:${port}` : ''}`;
-    shareUrlInput.value = `${baseUrl}/share/`;
-  }
-}
-
-// Update share URL when step 4 is shown
-// We'll hook into the existing showStep calls by observing step visibility
-const step4Observer = new MutationObserver(() => {
-  if (step4Div && step4Div.classList.contains('is-active')) {
-    updateShareUrl();
-  }
-});
-if (step4Div) {
-  step4Observer.observe(step4Div, { attributes: true, attributeFilter: ['class'] });
-}
-
-// Copy share URL button
-document.getElementById('copy-share-url')?.addEventListener('click', async (event) => {
-  event.preventDefault();
-  const shareUrlInput = document.getElementById('share-url');
-  if (shareUrlInput) {
-    shareUrlInput.select();
-    try {
-      await navigator.clipboard.writeText(shareUrlInput.value);
-      const button = event.target;
-      const originalText = button.textContent;
-      button.textContent = 'Copied!';
-      button.classList.add('is-success');
-      setTimeout(() => {
-        button.textContent = originalText;
-        button.classList.remove('is-success');
-      }, 2000);
-    } catch (error) {
-      // Fallback for browsers that don't support clipboard API
-      document.execCommand('copy');
-    }
-  }
-});
-
+// Step 4 - Setup Scripts (download links with instructions shown in HTML)
 // Step 4 Continue button (no form submission needed)
 step4Div?.querySelector('button[data-action="next"]')?.addEventListener('click', (event) => {
   event.preventDefault();
