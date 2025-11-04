@@ -3,7 +3,7 @@ import { validateSession } from '../services/sessionService.js';
 import { userHasGroup } from '../services/ldapService.js';
 
 function isApiRequest(req) {
-  return req.path.startsWith('/api/') || req.path.startsWith('/admin/api');
+  return req.path.startsWith('/api/') || req.path.startsWith('/getProxyAdmin/api');
 }
 
 export async function authenticate(req, res, next) {

@@ -76,7 +76,7 @@ async function postJson(url, payload) {
 }
 
 async function deleteResource(id) {
-  const response = await fetch(`/admin/api/resources/${id}`, { method: 'DELETE' });
+  const response = await fetch(`/getProxyAdmin/api/resources/${id}`, { method: 'DELETE' });
   if (!response.ok) {
     const data = await response.json().catch(() => ({}));
     throw new Error(data.error || 'Failed to delete resource');
@@ -268,7 +268,7 @@ resourceSaveButton.addEventListener('click', async () => {
   };
   
   try {
-    await postJson('/admin/api/resources', payload);
+    await postJson('/getProxyAdmin/api/resources', payload);
     resources.push({ ...payload, allowed_groups });
     renderResources();
     renderStatusCards();
@@ -300,8 +300,8 @@ settingsForm.addEventListener('submit', async (event) => {
   };
 
   try {
-    await postJson('/admin/api/settings/site', payload);
-    await postJson('/admin/api/settings/auth', {
+    await postJson('/getProxyAdmin/api/settings/site', payload);
+    await postJson('/getProxyAdmin/api/settings/auth', {
       adminGroupDns: payload.adminGroupDns
     });
     showAlert('Settings saved.', 'is-success');
@@ -329,7 +329,7 @@ userModal.querySelector('.modal-background').addEventListener('click', closeUser
 userSaveButton.addEventListener('click', async () => {
   if (!activeUser) return;
   try {
-    await fetch(`/admin/api/users/${activeUser.sAMAccountName}`, {
+    await fetch(`/getProxyAdmin/api/users/${activeUser.sAMAccountName}`, {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -347,7 +347,7 @@ userSaveButton.addEventListener('click', async () => {
 userresetWebauthnButton.addEventListener('click', async () => {
   if (!activeUser) return;
   try {
-    await postJson(`/admin/api/users/${activeUser.sAMAccountName}/reset-webauthn`, {});
+    await postJson(`/getProxyAdmin/api/users/${activeUser.sAMAccountName}/reset-webauthn`, {});
     showAlert('WebAuthn credentials cleared.', 'is-warning');
   } catch (error) {
     showAlert(error.message);
@@ -357,7 +357,7 @@ userresetWebauthnButton.addEventListener('click', async () => {
 userUnlockButton.addEventListener('click', async () => {
   if (!activeUser) return;
   try {
-    await postJson(`/admin/api/users/${activeUser.sAMAccountName}/unlock`, {});
+    await postJson(`/getProxyAdmin/api/users/${activeUser.sAMAccountName}/unlock`, {});
     showAlert('User unlocked.', 'is-success');
   } catch (error) {
     showAlert(error.message);
@@ -367,7 +367,7 @@ userUnlockButton.addEventListener('click', async () => {
 userDisableButton.addEventListener('click', async () => {
   if (!activeUser) return;
   try {
-    await postJson(`/admin/api/users/${activeUser.sAMAccountName}/disable`, {});
+    await postJson(`/getProxyAdmin/api/users/${activeUser.sAMAccountName}/disable`, {});
     showAlert('User disabled.', 'is-warning');
   } catch (error) {
     showAlert(error.message);
@@ -376,7 +376,7 @@ userDisableButton.addEventListener('click', async () => {
 
 async function loadUsers(query = '') {
   try {
-    const data = await getJson(`/admin/api/users?query=${encodeURIComponent(query)}`);
+    const data = await getJson(`/getProxyAdmin/api/users?query=${encodeURIComponent(query)}`);
     userTableBody.innerHTML = '';
     data.users.forEach((user) => {
       const row = document.createElement('tr');
@@ -390,7 +390,7 @@ async function loadUsers(query = '') {
         <td class="has-text-right"><button class="button is-small" data-sam="${user.sAMAccountName}">Manage</button></td>
       `;
       row.querySelector('button').addEventListener('click', async () => {
-        const detail = await getJson(`/admin/api/users/${user.sAMAccountName}`);
+        const detail = await getJson(`/getProxyAdmin/api/users/${user.sAMAccountName}`);
         openUserModal(detail.user);
       });
       userTableBody.appendChild(row);
@@ -421,7 +421,7 @@ async function searchGroups(query, selectElement) {
   }
   
   try {
-    const response = await fetch(`/admin/api/groups?query=${encodeURIComponent(query)}&size=20`);
+    const response = await fetch(`/getProxyAdmin/api/groups?query=${encodeURIComponent(query)}&size=20`);
     const data = await response.json();
     
     if (!data.groups || data.groups.length === 0) {
@@ -525,7 +525,7 @@ async function loadGroupsFromSettings() {
     for (const dn of adminDns) {
       try {
         // Search for the group by DN - the API supports searching by DN
-        const response = await fetch(`/admin/api/groups?query=${encodeURIComponent(dn)}&size=100`);
+        const response = await fetch(`/getProxyAdmin/api/groups?query=${encodeURIComponent(dn)}&size=100`);
         const data = await response.json();
         
         if (data.groups && data.groups.length > 0) {
@@ -559,8 +559,8 @@ async function loadGroupsFromSettings() {
 
 async function bootstrap() {
   try {
-    settings = await getJson('/admin/api/settings');
-    resources = (await getJson('/admin/api/resources')).resources;
+    settings = await getJson('/getProxyAdmin/api/settings');
+    resources = (await getJson('/getProxyAdmin/api/resources')).resources;
     populateSettingsForm();
     renderResources();
     renderStatusCards();
