@@ -633,14 +633,10 @@ let adminGroups = [];
 
 let groupSearchTimeout = null;
 
-async function searchGroups(query, selectElement) {
-  if (!query || query.length < 2) {
-    selectElement.innerHTML = '<option value="">Type at least 2 characters to search...</option>';
-    return;
-  }
-  
+async function searchGroups(query, selectElement, size = 100) {
   try {
-    const response = await fetch(`/gateProxyAdmin/api/groups?query=${encodeURIComponent(query)}&size=20`);
+    const searchQuery = query && query.trim().length > 0 && query !== '*' ? query.trim() : '*';
+    const response = await fetch(`/gateProxyAdmin/api/groups?query=${encodeURIComponent(searchQuery)}&size=${size}`);
     const data = await response.json();
     
     if (!data.groups || data.groups.length === 0) {
@@ -660,7 +656,7 @@ async function searchGroups(query, selectElement) {
     });
   } catch (error) {
     console.error('Error searching groups:', error);
-    selectElement.innerHTML = '<option value="">Error searching groups</option>';
+    selectElement.innerHTML = '<option value="">Error loading groups</option>';
   }
 }
 
@@ -718,12 +714,19 @@ function addGroupToList(dn, name, type) {
   }
 }
 
-// Admin groups
+// Admin groups - load all groups when dropdown is focused
+adminGroupSelect.addEventListener('focus', async () => {
+  if (adminGroupSelect.options.length <= 1) {
+    // Only reload if dropdown is empty or has just the placeholder
+    await searchGroups('*', adminGroupSelect, 200);
+  }
+});
+
 adminGroupSearch.addEventListener('input', (e) => {
   clearTimeout(groupSearchTimeout);
   const query = e.target.value.trim();
   groupSearchTimeout = setTimeout(() => {
-    searchGroups(query, adminGroupSelect);
+    searchGroups(query || '*', adminGroupSelect, 200);
   }, 300);
 });
 
@@ -771,8 +774,12 @@ async function loadGroupsFromSettings() {
       }
     }
     
+    // Render the selected groups
     renderGroupList(adminGroups, adminGroupsList, 'admin');
     updateGroupHiddenInput('admin');
+    
+    // Load all groups into the dropdown for selection
+    await searchGroups('*', adminGroupSelect, 200);
   }
 }
 

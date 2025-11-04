@@ -35,6 +35,100 @@
                 <p class="subtitle">Review high-level configuration.</p>
                 <div id="status-cards" class="columns is-multiline"></div>
               </div>
+              
+              <div class="box mt-5">
+                <h2 class="title is-4">Setup Scripts</h2>
+                <p class="subtitle is-6">Download and run these scripts on your servers to complete the integration.</p>
+                
+                <div class="columns mt-5">
+                  <div class="column">
+                    <div class="card">
+                      <div class="card-header">
+                        <p class="card-header-title">Domain Controller Setup</p>
+                      </div>
+                      <div class="card-content">
+                        <p class="mb-4">Configures your domain controller for Linux Gate Proxy integration. Creates service account, firewall rules, and DNS records.</p>
+                        <div class="field">
+                          <label class="label">Download Scripts:</label>
+                          <div class="buttons">
+                            <a href="/share/configure-domain-controller.bat" class="button is-link is-outlined" download>
+                              <span class="icon"><i class="fas fa-download"></i></span>
+                              <span>configure-domain-controller.bat</span>
+                            </a>
+                            <a href="/share/configure-domain-controller.ps1" class="button is-link is-outlined" download>
+                              <span class="icon"><i class="fas fa-download"></i></span>
+                              <span>configure-domain-controller.ps1</span>
+                            </a>
+                          </div>
+                        </div>
+                        <div class="message is-info mt-4">
+                          <div class="message-body">
+                            <p class="has-text-weight-semibold mb-2">Instructions:</p>
+                            <ol class="ml-4" style="list-style-type: decimal;">
+                              <li class="mb-2">Download both files to your domain controller</li>
+                              <li class="mb-2">Double-click <code>configure-domain-controller.bat</code></li>
+                              <li class="mb-2">The script will automatically request administrator privileges</li>
+                              <li class="mb-2">When prompted, enter the tunnel hostname (e.g., tunnel.yourdomain.com)</li>
+                              <li class="mb-2">Enter the Gate Proxy host IP address</li>
+                              <li>Enter a password for the service account when prompted</li>
+                            </ol>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div class="column">
+                    <div class="card">
+                      <div class="card-header">
+                        <p class="card-header-title">Certificate Server Setup</p>
+                      </div>
+                      <div class="card-content">
+                        <p class="mb-4">Configures your certificate authority to issue WebAuthn certificates for Gate Proxy.</p>
+                        <div class="field">
+                          <label class="label">Download Scripts:</label>
+                          <div class="buttons">
+                            <a href="/share/configure-certificate-server.bat" class="button is-link is-outlined" download>
+                              <span class="icon"><i class="fas fa-download"></i></span>
+                              <span>configure-certificate-server.bat</span>
+                            </a>
+                            <a href="/share/configure-certificate-server.ps1" class="button is-link is-outlined" download>
+                              <span class="icon"><i class="fas fa-download"></i></span>
+                              <span>configure-certificate-server.ps1</span>
+                            </a>
+                          </div>
+                        </div>
+                        <div class="message is-info mt-4">
+                          <div class="message-body">
+                            <p class="has-text-weight-semibold mb-2">Instructions:</p>
+                            <ol class="ml-4" style="list-style-type: decimal;">
+                              <li class="mb-2">Download both files to your certificate server</li>
+                              <li class="mb-2">Double-click <code>configure-certificate-server.bat</code></li>
+                              <li class="mb-2">The script will automatically request administrator privileges</li>
+                              <li class="mb-2">When prompted, enter the external hostname (e.g., sora2jailbreak.com)</li>
+                              <li>The script will create a certificate template and submit a certificate request</li>
+                            </ol>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+                <div class="message is-warning mt-5">
+                  <div class="message-header">
+                    <p>Important Notes</p>
+                  </div>
+                  <div class="message-body">
+                    <ul class="ml-4">
+                      <li>Both scripts require Active Directory and appropriate server roles to be installed</li>
+                      <li>Ensure your account has the necessary permissions (Domain Admin for DC, CA Admin for Certificate Server)</li>
+                      <li>The scripts will prompt for required information during execution</li>
+                      <li>The .bat files automatically run as administrator. You can also run the .ps1 files directly if you prefer</li>
+                    </ul>
+                  </div>
+                </div>
+              </div>
             </div>
 
             <div id="view-settings" class="admin-view">

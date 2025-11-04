@@ -41,7 +41,6 @@ router.get('/gateProxyAdmin/api/settings', requireAdmin, (req, res) => {
     site: config.site,
     auth: config.auth,
     proxy: config.proxy,
-    samba: config.samba,
     smtp: config.smtp,
     cloudflare: {
       tunnelName: config.cloudflare.tunnelName,
@@ -341,7 +340,7 @@ router.get('/gateProxyAdmin/api/settings/export', requireAdmin, (req, res) => {
         // Don't export passwords - they're stored as secrets
       },
       proxy: config.proxy,
-      samba: config.samba,
+
       smtp: {
         // Don't export SMTP password
         host: config.smtp.host,
@@ -386,9 +385,7 @@ router.post('/gateProxyAdmin/api/settings/import', requireAdmin, (req, res) => {
     if (importData.proxy) {
       saveConfigSection('proxy', importData.proxy);
     }
-    if (importData.samba) {
-      saveConfigSection('samba', importData.samba);
-    }
+
     if (importData.smtp) {
       // Don't import SMTP password - keep existing
       const currentSmtp = loadConfig().smtp;

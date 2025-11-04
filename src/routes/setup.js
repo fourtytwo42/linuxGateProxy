@@ -13,7 +13,7 @@ import {
   createTunnel,
   hasCertificate
 } from '../services/cloudflareService.js';
-import { sambaManager } from '../services/sambaService.js';
+
 import { storeSmtpPassword } from '../services/otpService.js';
 import { commandExists } from '../utils/command.js';
 
@@ -24,7 +24,6 @@ router.get('/api/setup/status', (req, res) => {
   res.json({
     completed: config.setup.completed,
     prerequisites: {
-      samba: commandExists('smbd'),
       cloudflared: commandExists('cloudflared'),
       installScript: 'scripts/install-prereqs.sh'
     },
@@ -158,17 +157,7 @@ router.post('/api/setup/smtp', (req, res) => {
 
 
 
-router.post('/api/setup/samba', (req, res) => {
-  const { shareName = 'GateProxySetup', guestOk = false } = req.body;
-  const config = loadConfig();
-  saveConfigSection('samba', {
-    ...config.samba,
-    shareName,
-    guestOk
-  });
-  sambaManager.start();
-  res.json({ success: true });
-});
+
 
 router.post('/api/setup/proxy', (req, res) => {
   const { targetHost, resources = [] } = req.body;

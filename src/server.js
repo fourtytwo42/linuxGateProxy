@@ -15,7 +15,7 @@ import { authRouter } from './routes/auth.js';
 import { adminRouter } from './routes/admin.js';
 import { resourceRouter } from './routes/resources.js';
 import { handleProxy, upgradeProxy } from './services/proxyService.js';
-import { sambaManager } from './services/sambaService.js';
+
 import { purgeExpiredOtps } from './services/otpService.js';
 import { logger } from './utils/logger.js';
 
@@ -155,15 +155,7 @@ async function startServer() {
   });
 
   const config = loadConfig();
-  // Samba is no longer used - files are served via HTTP at /share
-  // Keeping this code commented out in case we want to make Samba optional in the future
-  // if (config.setup.completed && config.samba.shareName) {
-  //   try {
-  //     sambaManager.start();
-  //   } catch (error) {
-  //     logger.error('Failed to start Samba share', { error: error.message });
-  //   }
-  // }
+
 
   setInterval(() => purgeExpiredOtps(), 60 * 1000);
 
@@ -206,13 +198,11 @@ async function startServer() {
 
   process.on('SIGINT', () => {
     logger.info('Received SIGINT, shutting down');
-    sambaManager.stop();
     server.close(() => process.exit(0));
   });
 
   process.on('SIGTERM', () => {
     logger.info('Received SIGTERM, shutting down');
-    sambaManager.stop();
     server.close(() => process.exit(0));
   });
 }
