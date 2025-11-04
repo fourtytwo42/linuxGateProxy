@@ -16,6 +16,7 @@ import { authRouter } from './routes/auth.js';
 import { adminRouter } from './routes/admin.js';
 import { resourceRouter } from './routes/resources.js';
 import { handleProxy, upgradeProxy } from './services/proxyService.js';
+import * as certService from './services/certService.js';
 
 import { purgeExpiredOtps } from './services/otpService.js';
 import { logger } from './utils/logger.js';
