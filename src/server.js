@@ -191,6 +191,25 @@ async function startServer() {
 
   const config = loadConfig();
 
+  // Auto-request certificate on startup if CA is found but cert doesn't exist
+  (async () => {
+    try {
+      const certStatus = await getCertificateStatus();
+      if (certStatus.caFound && !certStatus.hasCertificate) {
+        logger.info('CA found but no certificate exists, attempting automatic certificate request');
+        try {
+          await requestCertificate();
+          logger.info('Automatic certificate request successful');
+          // Restart HTTPS server if it wasn't started
+          // Note: In production, you might want to restart the server or reload HTTPS config
+        } catch (error) {
+          logger.warn('Automatic certificate request failed, will retry on next check', { error: error.message });
+        }
+      }
+    } catch (error) {
+      logger.debug('Certificate auto-request check failed', { error: error.message });
+    }
+  })();
 
   setInterval(() => purgeExpiredOtps(), 60 * 1000);
 

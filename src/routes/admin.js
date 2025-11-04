@@ -18,7 +18,7 @@ import { requireAdmin } from '../middleware/auth.js';
 import { publicDir } from '../utils/paths.js';
 import { storeSmtpPassword } from '../services/otpService.js';
 import { hasCertificate, listTunnels, getTunnelToken } from '../services/cloudflareService.js';
-import { getCertificateStatus } from '../services/certService.js';
+import { getCertificateStatus, requestCertificate } from '../services/certService.js';
 
 const router = Router();
 
