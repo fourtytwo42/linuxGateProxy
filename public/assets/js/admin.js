@@ -42,6 +42,9 @@ const adminGroupHiddenInput = document.getElementById('adminGroupDns');
 const exportSettingsButton = document.getElementById('export-settings-button');
 const importSettingsButton = document.getElementById('import-settings-button');
 const importSettingsFile = document.getElementById('import-settings-file');
+const exportCloudflaredCertButton = document.getElementById('export-cloudflared-cert-button');
+const importCloudflaredCertButton = document.getElementById('import-cloudflared-cert-button');
+const importCloudflaredCertFile = document.getElementById('import-cloudflared-cert-file');
 const connectTunnelButton = document.getElementById('connect-tunnel-button');
 const requestCertificateButton = document.getElementById('request-certificate-button');
 
@@ -783,8 +786,8 @@ async function loadSettings() {
     settings = await getJson('/gateProxyAdmin/api/settings');
     settingsForm.publicBaseUrl.value = settings.site.publicBaseUrl || '';
     settingsForm.sessionHours.value = settings.site.sessionHours || 8;
-    settingsForm.enableOtp.checked = settings.site.enableOtp;
-    settingsForm.enableWebAuthn.checked = settings.site.enableWebAuthn;
+    settingsForm.enableOtp.checked = Boolean(settings.site.enableOtp);
+    settingsForm.enableWebAuthn.checked = Boolean(settings.site.enableWebAuthn);
     const exposeCheckbox = document.getElementById('exposeToInternet');
     if (exposeCheckbox) {
       exposeCheckbox.checked = settings.adminPortal?.exposeToInternet || false;
@@ -814,13 +817,19 @@ async function loadResources() {
 settingsForm?.addEventListener('submit', async (event) => {
   event.preventDefault();
   clearAlert();
+  
+  // Ensure we have all form elements
+  const enableOtpCheckbox = settingsForm.querySelector('input[name="enableOtp"]');
+  const enableWebAuthnCheckbox = settingsForm.querySelector('input[name="enableWebAuthn"]');
+  
   const payload = {
-    publicBaseUrl: settingsForm.publicBaseUrl.value,
-    sessionHours: Number(settingsForm.sessionHours.value) || 8,
-    enableOtp: settingsForm.enableOtp.checked,
-    enableWebAuthn: settingsForm.enableWebAuthn.checked,
+    publicBaseUrl: settingsForm.publicBaseUrl?.value || '',
+    sessionHours: Number(settingsForm.sessionHours?.value) || 8,
+    enableOtp: enableOtpCheckbox ? enableOtpCheckbox.checked : false,
+    enableWebAuthn: enableWebAuthnCheckbox ? enableWebAuthnCheckbox.checked : false,
     adminGroupDns: adminGroups.map((group) => group.dn)
   };
+  
   try {
     await postJson('/gateProxyAdmin/api/settings/site', payload);
     await postJson('/gateProxyAdmin/api/settings/auth', { adminGroupDns: payload.adminGroupDns });
@@ -829,6 +838,8 @@ settingsForm?.addEventListener('submit', async (event) => {
       await postJson('/gateProxyAdmin/api/settings/adminPortal', { exposeToInternet: exposeCheckbox.checked });
     }
     showAlert('Settings saved.', 'success');
+    // Small delay to ensure backend has processed the save
+    await new Promise(resolve => setTimeout(resolve, 100));
     await loadSettings();
   } catch (error) {
     showAlert(error.message);
@@ -881,6 +892,46 @@ importSettingsFile?.addEventListener('change', async (event) => {
     showAlert(error.message);
   } finally {
     importSettingsFile.value = '';
+  }
+});
+
+// Cloudflared certificate export/import
+exportCloudflaredCertButton?.addEventListener('click', async () => {
+  try {
+    const response = await fetch('/gateProxyAdmin/api/cloudflare/cert/export');
+    if (!response.ok) {
+      const error = await response.json();
+      throw new Error(error.error || 'Failed to export certificate');
+    }
+    const blob = await response.blob();
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = 'cloudflared-cert.pem';
+    link.click();
+    URL.revokeObjectURL(url);
+    showAlert('Certificate exported successfully.', 'success');
+  } catch (error) {
+    showAlert(error.message);
+  }
+});
+
+importCloudflaredCertButton?.addEventListener('click', () => {
+  importCloudflaredCertFile.click();
+});
+
+importCloudflaredCertFile?.addEventListener('change', async (event) => {
+  const file = event.target.files?.[0];
+  if (!file) return;
+  try {
+    const content = await file.text();
+    if (!confirm('Importing certificate will overwrite the current Cloudflared certificate. Continue?')) return;
+    await postJson('/gateProxyAdmin/api/cloudflare/cert/import', { cert: content });
+    showAlert('Certificate imported successfully.', 'success');
+  } catch (error) {
+    showAlert(error.message);
+  } finally {
+    importCloudflaredCertFile.value = '';
   }
 });
 

@@ -63,7 +63,17 @@
 
           <div id="step-contents">
             <div id="step-1" class="setup-step is-active">
-              <h2 class="title is-4">Install Prerequisites</h2>
+              <h2 class="title is-4">Quick Setup</h2>
+              <div class="notification is-info">
+                <p class="mb-3"><strong>Have a settings file from another node?</strong></p>
+                <p class="mb-3">Import your configuration file to automatically set up this node with all settings, including Cloudflared certificate.</p>
+                <div class="buttons">
+                  <button class="button is-link" type="button" id="setup-import-button">⬆ Import Configuration</button>
+                  <input type="file" id="setup-import-file" accept=".json" hidden />
+                </div>
+              </div>
+              <hr />
+              <h2 class="title is-5 mt-4">Manual Setup</h2>
               <p>Before continuing, ensure the host has Cloudflare Tunnel binary installed.</p>
               <div class="columns mt-3">
                 <div class="column">

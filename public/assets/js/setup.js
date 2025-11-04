@@ -8,6 +8,8 @@ const prereqCloudflaredCard = document.getElementById('prereq-cloudflared');
 const prereqScriptNode = document.getElementById('prereq-script');
 const prereqRefreshButton = document.getElementById('prereq-refresh');
 const prereqContinueButton = document.getElementById('prereq-continue');
+const setupImportButton = document.getElementById('setup-import-button');
+const setupImportFile = document.getElementById('setup-import-file');
 
 const prereqSection = document.getElementById('step-1');
 const ldapForm = document.getElementById('step-2');
@@ -245,10 +247,59 @@ prereqRefreshButton?.addEventListener('click', async () => {
   await refreshPrereqs();
 });
 
+// Setup import handler
+setupImportButton?.addEventListener('click', () => {
+  setupImportFile.click();
+});
+
+setupImportFile?.addEventListener('change', async (event) => {
+  const file = event.target.files?.[0];
+  if (!file) return;
+  
+  try {
+    clearAlert();
+    const content = await file.text();
+    const importData = JSON.parse(content);
+    
+    if (!confirm('Importing configuration will overwrite current settings and complete setup. Continue?')) {
+      setupImportFile.value = '';
+      return;
+    }
+    
+    // Show loading state
+    setupImportButton.disabled = true;
+    setupImportButton.textContent = 'Importing...';
+    
+    const response = await fetch('/api/setup/import', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(importData)
+    });
+    
+    const result = await response.json();
+    
+    if (!response.ok) {
+      throw new Error(result.error || 'Import failed');
+    }
+    
+    // Success! Reload the page to show the completed setup
+    showAlert('Configuration imported successfully! Reloading...', 'success');
+    setTimeout(() => {
+      window.location.href = '/';
+    }, 1500);
+  } catch (error) {
+    showAlert(error.message);
+    setupImportButton.disabled = false;
+    setupImportButton.textContent = '⬆ Import Configuration';
+  } finally {
+    setupImportFile.value = '';
+  }
+});
+
 prereqContinueButton?.addEventListener('click', () => {
   clearAlert();
-  if (!setupState.prereqs?.samba || !setupState.prereqs?.cloudflared) {
-    showAlert('Install Samba and Cloudflared using the helper script before continuing.');
+  if (!setupState.prereqs?.cloudflared) {
+    showAlert('Install Cloudflared using the helper script before continuing.');
     return;
   }
   showStep(2);

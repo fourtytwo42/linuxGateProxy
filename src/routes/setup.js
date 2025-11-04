@@ -1,4 +1,7 @@
 import { Router } from 'express';
+import fs from 'fs';
+import path from 'path';
+import os from 'os';
 import {
   loadConfig,
   saveConfigSection,
@@ -11,7 +14,8 @@ import {
   listTunnels,
   getTunnelToken,
   createTunnel,
-  hasCertificate
+  hasCertificate,
+  DEFAULT_CERT_PATH
 } from '../services/cloudflareService.js';
 
 import { storeSmtpPassword } from '../services/otpService.js';
@@ -41,6 +45,80 @@ router.get('/api/setup/status', (req, res) => {
     smtp: config.smtp,
     resources: listResources()
   });
+});
+
+// Import settings and auto-complete setup if everything is provided
+router.post('/api/setup/import', async (req, res) => {
+  try {
+    const importData = req.body;
+    
+    if (!importData || typeof importData !== 'object') {
+      return res.status(400).json({ error: 'Invalid import data' });
+    }
+    
+    // Validate that we have required configuration
+    const hasRequiredConfig = 
+      importData.site?.publicBaseUrl &&
+      importData.auth?.domain &&
+      importData.auth?.ldapHost &&
+      importData.auth?.baseDn;
+    
+    if (!hasRequiredConfig) {
+      return res.status(400).json({ 
+        error: 'Missing required configuration. Import must include: site.publicBaseUrl, auth.domain, auth.ldapHost, auth.baseDn' 
+      });
+    }
+    
+    // Import each section
+    if (importData.site) {
+      saveConfigSection('site', importData.site);
+    }
+    if (importData.auth) {
+      saveConfigSection('auth', importData.auth);
+    }
+    if (importData.proxy) {
+      saveConfigSection('proxy', importData.proxy);
+    }
+    if (importData.smtp) {
+      saveConfigSection('smtp', importData.smtp);
+    }
+    if (importData.cloudflare) {
+      saveConfigSection('cloudflare', importData.cloudflare);
+    }
+    if (importData.resources && Array.isArray(importData.resources)) {
+      for (const resource of importData.resources) {
+        upsertResource(resource);
+      }
+    }
+    
+    // Import Cloudflared certificate if present
+    if (importData.cloudflaredCert && typeof importData.cloudflaredCert === 'string') {
+      try {
+        const cloudflaredDir = path.dirname(DEFAULT_CERT_PATH);
+        if (!fs.existsSync(cloudflaredDir)) {
+          fs.mkdirSync(cloudflaredDir, { mode: 0o700, recursive: true });
+        }
+        fs.writeFileSync(DEFAULT_CERT_PATH, importData.cloudflaredCert, { mode: 0o600 });
+      } catch (error) {
+        // Log but don't fail - cert might not be critical if tunnel is already configured
+        console.error('Failed to import Cloudflared certificate:', error.message);
+      }
+    }
+    
+    // Mark setup as complete since we have all required configuration
+    saveConfigSection('setup', {
+      completed: true,
+      completedAt: new Date().toISOString()
+    });
+    
+    res.json({ 
+      success: true, 
+      message: 'Configuration imported and setup completed successfully',
+      completed: true
+    });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
 });
 
 router.post('/api/setup/ldap', async (req, res, next) => {

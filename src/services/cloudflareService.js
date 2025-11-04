@@ -6,7 +6,7 @@ import { setSecret } from '../config/index.js';
 import { commandExists } from '../utils/command.js';
 import { logger } from '../utils/logger.js';
 
-const DEFAULT_CERT_PATH = path.join(os.homedir(), '.cloudflared', 'cert.pem');
+export const DEFAULT_CERT_PATH = path.join(os.homedir(), '.cloudflared', 'cert.pem');
 
 let tunnelProcess = null;
 

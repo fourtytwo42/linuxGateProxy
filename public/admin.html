@@ -196,8 +196,15 @@
                     <p>Keep your deployment paired with the correct tunnel endpoint.</p>
                   </header>
                   <p class="integration-status">Status: <span id="tunnel-status">Checking...</span></p>
-                  <button class="button is-success" id="auto-detect-tunnel-button">Auto-detect tunnel</button>
-                  <button class="button is-link" id="connect-tunnel-button">Connect to existing tunnel</button>
+                  <div style="display: flex; gap: 0.5rem; flex-wrap: wrap; margin-bottom: 0.5rem;">
+                    <button class="button is-success" id="auto-detect-tunnel-button">Auto-detect tunnel</button>
+                    <button class="button is-link" id="connect-tunnel-button">Connect to existing tunnel</button>
+                  </div>
+                  <div style="display: flex; gap: 0.5rem; flex-wrap: wrap;">
+                    <button class="button is-outline" id="export-cloudflared-cert-button">Export Cert</button>
+                    <button class="button is-outline" id="import-cloudflared-cert-button">Import Cert</button>
+                    <input type="file" id="import-cloudflared-cert-file" accept=".pem,.txt" style="display: none;" />
+                  </div>
                 </div>
 
                 <div class="integration-card">
@@ -223,7 +230,7 @@
                     <button class="button is-outline" id="export-settings-button">⬇ Export JSON</button>
                     <button class="button is-outline" id="import-settings-button">⬆ Import JSON</button>
                   </div>
-                  <p class="help">Passwords and secrets stay encrypted and are not exported.</p>
+                  <p class="help">Passwords and secrets stay encrypted and are not exported. Cloudflared certificate is included if available.</p>
                   <input type="file" id="import-settings-file" accept=".json" hidden />
                 </div>
               </section>

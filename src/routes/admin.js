@@ -1,5 +1,6 @@
 import { Router } from 'express';
 import path from 'path';
+import fs from 'fs';
 import { loadConfig, saveConfigSection, upsertResource, listResources, deleteResource } from '../config/index.js';
 import { logger } from '../utils/logger.js';
 import {
@@ -18,7 +19,7 @@ import {
 import { requireAdmin } from '../middleware/auth.js';
 import { publicDir } from '../utils/paths.js';
 import { storeSmtpPassword } from '../services/otpService.js';
-import { hasCertificate, listTunnels, getTunnelToken, runTunnel, stopTunnel, isTunnelRunning, getTunnelInfo, autoDetectTunnel } from '../services/cloudflareService.js';
+import { hasCertificate, listTunnels, getTunnelToken, runTunnel, stopTunnel, isTunnelRunning, getTunnelInfo, autoDetectTunnel, DEFAULT_CERT_PATH } from '../services/cloudflareService.js';
 import { getCertificateStatus, requestCertificate } from '../services/certService.js';
 
 const router = Router();
@@ -136,7 +137,17 @@ router.get('/gateProxyAdmin/api/settings', requireAdmin, async (req, res) => {
 });
 
 router.post('/gateProxyAdmin/api/settings/site', requireAdmin, (req, res) => {
-  saveConfigSection('site', { ...loadConfig().site, ...req.body });
+  const existing = loadConfig().site;
+  const updates = {
+    ...existing,
+    ...req.body,
+    // Explicitly ensure boolean values are properly set
+    enableOtp: Boolean(req.body.enableOtp),
+    enableWebAuthn: Boolean(req.body.enableWebAuthn),
+    // Ensure numeric values are properly set
+    sessionHours: Number(req.body.sessionHours) || existing.sessionHours || 8
+  };
+  saveConfigSection('site', updates);
   res.json({ success: true });
 });
 
@@ -595,6 +606,16 @@ router.get('/gateProxyAdmin/api/settings/export', requireAdmin, (req, res) => {
     const config = loadConfig();
     const resources = listResources();
     
+    // Include Cloudflared certificate if it exists
+    let cloudflaredCert = null;
+    if (hasCertificate()) {
+      try {
+        cloudflaredCert = fs.readFileSync(DEFAULT_CERT_PATH, 'utf8');
+      } catch (error) {
+        logger.warn('Failed to read Cloudflared certificate for export', { error: error.message });
+      }
+    }
+    
     // Export all settings except secrets (passwords, etc.)
     const exportData = {
       version: '1.0',
@@ -605,16 +626,18 @@ router.get('/gateProxyAdmin/api/settings/export', requireAdmin, (req, res) => {
         // Don't export passwords - they're stored as secrets
       },
       proxy: config.proxy,
-
       smtp: {
         // Don't export SMTP password
         host: config.smtp.host,
         port: config.smtp.port,
         secure: config.smtp.secure,
         from: config.smtp.from,
+        username: config.smtp.username,
+        replyTo: config.smtp.replyTo,
         // password is stored as secret, don't export
       },
       cloudflare: config.cloudflare,
+      cloudflaredCert: cloudflaredCert, // Include cert if available
       resources: resources
     };
     
@@ -669,7 +692,63 @@ router.post('/gateProxyAdmin/api/settings/import', requireAdmin, (req, res) => {
       }
     }
     
+    // Import Cloudflared certificate if present
+    if (importData.cloudflaredCert && typeof importData.cloudflaredCert === 'string') {
+      try {
+        const cloudflaredDir = path.dirname(DEFAULT_CERT_PATH);
+        if (!fs.existsSync(cloudflaredDir)) {
+          fs.mkdirSync(cloudflaredDir, { mode: 0o700, recursive: true });
+        }
+        fs.writeFileSync(DEFAULT_CERT_PATH, importData.cloudflaredCert, { mode: 0o600 });
+        logger.info('Cloudflared certificate imported from settings');
+      } catch (error) {
+        logger.error('Failed to import Cloudflared certificate', { error: error.message });
+        // Don't fail the whole import if cert import fails
+      }
+    }
+    
     res.json({ success: true });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Cloudflared certificate export/import
+router.get('/gateProxyAdmin/api/cloudflare/cert/export', requireAdmin, (req, res) => {
+  try {
+    if (!hasCertificate()) {
+      return res.status(404).json({ error: 'Cloudflared certificate not found' });
+    }
+    
+    const certContent = fs.readFileSync(DEFAULT_CERT_PATH, 'utf8');
+    
+    res.setHeader('Content-Type', 'application/x-pem-file');
+    res.setHeader('Content-Disposition', 'attachment; filename="cloudflared-cert.pem"');
+    res.send(certContent);
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+router.post('/gateProxyAdmin/api/cloudflare/cert/import', requireAdmin, (req, res) => {
+  try {
+    const { cert } = req.body;
+    
+    if (!cert || typeof cert !== 'string') {
+      return res.status(400).json({ error: 'Invalid certificate data' });
+    }
+    
+    // Ensure .cloudflared directory exists
+    const cloudflaredDir = path.dirname(DEFAULT_CERT_PATH);
+    if (!fs.existsSync(cloudflaredDir)) {
+      fs.mkdirSync(cloudflaredDir, { mode: 0o700, recursive: true });
+    }
+    
+    // Write certificate file
+    fs.writeFileSync(DEFAULT_CERT_PATH, cert, { mode: 0o600 });
+    
+    logger.info('Cloudflared certificate imported successfully');
+    res.json({ success: true, message: 'Certificate imported successfully' });
   } catch (error) {
     res.status(500).json({ error: error.message });
   }
