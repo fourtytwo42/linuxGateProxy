@@ -533,8 +533,20 @@ export async function readWebAuthnCredentials(userDn) {
       return [];
     }
     const raw = Array.isArray(entry[attr]) ? entry[attr][0] : entry[attr];
+    
+    // Handle invalid values: null, undefined, or the string "undefined"/"null"
+    if (!raw) {
+      return [];
+    }
+    
+    // Ensure it's a string and trim it
+    const rawString = String(raw).trim();
+    if (!rawString || rawString === 'undefined' || rawString === 'null') {
+      return [];
+    }
+    
     try {
-      return JSON.parse(raw);
+      return JSON.parse(rawString);
     } catch (error) {
       logger.error('Failed to parse WebAuthn credentials', { error: error.message });
       return [];
