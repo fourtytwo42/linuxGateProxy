@@ -598,16 +598,15 @@ addUserSaveButton.addEventListener('click', async () => {
     return;
   }
   
-  const payload = {
-    sAMAccountName: formData.get('sAMAccountName'),
-    displayName: formData.get('displayName'),
-    password: password,
-    givenName: formData.get('givenName') || undefined,
-    sn: formData.get('sn') || undefined,
-    mail: formData.get('mail') || undefined,
-    telephoneNumber: formData.get('telephoneNumber') || undefined,
-    enabled: formData.get('enabled') === 'on'
-  };
+            const payload = {
+            sAMAccountName: formData.get('sAMAccountName'),
+            displayName: formData.get('displayName'),
+            password: password,
+            givenName: formData.get('givenName') || undefined,
+            sn: formData.get('sn') || undefined,
+            mail: formData.get('mail') || undefined,
+            enabled: formData.get('enabled') === 'on'
+          };
   
   // Remove undefined fields
   Object.keys(payload).forEach(key => payload[key] === undefined && delete payload[key]);
