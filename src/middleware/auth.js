@@ -26,7 +26,8 @@ export async function authenticate(req, res, next) {
     }
     req.auth = {
       user: result.user,
-      expires: result.expires
+      expires: result.expires,
+      password: result.password // Include password for admin operations
     };
     return next();
   } catch (error) {

@@ -21,7 +21,27 @@ function timingSafeEquals(a, b) {
   return crypto.timingSafeEqual(buffA, buffB);
 }
 
-export async function ensureSession(userEntry) {
+function encryptPassword(password, secret) {
+  if (!password) return null;
+  const iv = crypto.randomBytes(16);
+  const cipher = crypto.createCipheriv('aes-256-cbc', secret.slice(0, 32), iv);
+  let encrypted = cipher.update(password, 'utf8', 'base64');
+  encrypted += cipher.final('base64');
+  return iv.toString('base64') + ':' + encrypted;
+}
+
+function decryptPassword(encryptedPassword, secret) {
+  if (!encryptedPassword) return null;
+  const [ivBase64, encrypted] = encryptedPassword.split(':');
+  if (!ivBase64 || !encrypted) return null;
+  const iv = Buffer.from(ivBase64, 'base64');
+  const decipher = crypto.createDecipheriv('aes-256-cbc', secret.slice(0, 32), iv);
+  let decrypted = decipher.update(encrypted, 'base64', 'utf8');
+  decrypted += decipher.final('utf8');
+  return decrypted;
+}
+
+export async function ensureSession(userEntry, password = null) {
   const config = loadConfig();
   const ttlSeconds = (config.site.sessionHours || 8) * 3600;
   const now = Math.floor(Date.now() / 1000);
@@ -39,6 +59,12 @@ export async function ensureSession(userEntry) {
       secret: secret.toString('base64'),
       expires
     };
+    await writeSessionInfo(dn, session);
+  }
+
+  // Encrypt and store password if provided
+  if (password) {
+    session.encryptedPassword = encryptPassword(password, secret);
     await writeSessionInfo(dn, session);
   }
 
@@ -83,10 +109,17 @@ export async function validateSession(token) {
     return { valid: false };
   }
 
+  // Decrypt password if stored
+  let password = null;
+  if (session.encryptedPassword) {
+    password = decryptPassword(session.encryptedPassword, secret);
+  }
+
   return {
     valid: true,
     user,
-    expires
+    expires,
+    password // Return decrypted password for use in LDAP operations
   };
 }
 

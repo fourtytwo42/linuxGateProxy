@@ -1,8 +1,9 @@
 export const defaultSettings = {
   site: {
-    listenAddress: '127.0.0.1',
-    listenPort: 5000,
-    publicBaseUrl: '',
+          listenAddress: '0.0.0.0',
+      listenPort: 80,
+      httpsPort: 443,
+      publicBaseUrl: '',
     sessionHours: 8,
     cookieName: 'GateAuth',
     enableOtp: false,

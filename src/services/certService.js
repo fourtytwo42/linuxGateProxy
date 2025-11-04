@@ -88,17 +88,101 @@ export async function discoverCA() {
         const configBase = ['CN=Configuration', ...baseParts].join(',');
         const searchBase = `CN=Enrollment Services,CN=Public Key Services,CN=Services,${configBase}`;
         
+        // Get domain for FQDN construction
+        const domain = inferDomain(config) || baseParts.map(p => p.split('=')[1]).join('.');
+        
         try {
           const result = await ldapClient.search(searchBase, {
             scope: 'sub',
             filter: '(objectClass=pKIEnrollmentService)',
-            attributes: ['dnsHostName', 'cn']
+            attributes: ['*'] // Request all attributes to see what's available
           });
           
           if (result.searchEntries && result.searchEntries.length > 0) {
             const ca = result.searchEntries[0];
+            
+            // Log what we received for debugging
+            logger.debug('CA enrollment service found', { 
+              cn: ca.cn, 
+              dnsHostName: ca.dnsHostName || ca.dNSHostName,
+              serverDNSName: ca.serverDNSName,
+              dn: ca.distinguishedName,
+              allAttributes: Object.keys(ca)
+            });
+            
+            // Get DNS hostname with case-insensitive access (AD uses dNSHostName with mixed case)
+            // Also check all possible attribute name variations
+            let dnsHostName = null;
+            let serverDNSName = null;
+            
+            // Check common attribute name variations (case-insensitive)
+            for (const key of Object.keys(ca)) {
+              const lowerKey = key.toLowerCase();
+              let value = ca[key];
+              
+              // Handle array values (LDAP attributes can be arrays)
+              if (Array.isArray(value) && value.length > 0) {
+                value = value[0];
+              }
+              
+              if ((lowerKey === 'dnshostname' || lowerKey === 'dns_host_name') && value) {
+                dnsHostName = value;
+                logger.debug('Found dNSHostName attribute', { key, value: dnsHostName });
+              } else if ((lowerKey === 'serverdnsname' || lowerKey === 'server_dns_name') && value) {
+                serverDNSName = value;
+                logger.debug('Found serverDNSName attribute', { key, value: serverDNSName });
+              }
+            }
+            
+            // Also try direct access with common case variations
+            if (!dnsHostName) {
+              dnsHostName = ca.dnsHostName || ca.dNSHostName || ca['dNSHostName'] || ca['DNSHostName'];
+            }
+            if (!serverDNSName) {
+              serverDNSName = ca.serverDNSName || ca.serverDnsName || ca['serverDNSName'];
+            }
+            
+            // Log what we found
+            logger.debug('DNS hostname lookup result', { dnsHostName, serverDNSName, caKeys: Object.keys(ca) });
+            
+            // Priority: dnsHostName > serverDNSName > construct FQDN from cn + domain
+            let caServer = null;
+            
+            if (dnsHostName) {
+              caServer = Array.isArray(dnsHostName) ? dnsHostName[0] : dnsHostName;
+              logger.debug('Using dNSHostName from enrollment service', { caServer });
+            } else if (serverDNSName) {
+              caServer = Array.isArray(serverDNSName) ? serverDNSName[0] : serverDNSName;
+              logger.debug('Using serverDNSName from enrollment service', { caServer });
+            } else if (ca.cn && domain) {
+              // Try to construct FQDN from CA name + domain
+              // If cn is like "Silverbacks-CA", try "Silverbacks-CA.domain.com"
+              caServer = `${ca.cn}.${domain.toLowerCase()}`;
+              logger.debug('Constructed CA server FQDN from cn and domain', { caServer, cn: ca.cn, domain });
+            } else {
+              // Last resort: use cn as-is (might not resolve)
+              caServer = ca.cn;
+              logger.warn('Using CA cn as server name (may not resolve)', { caServer: ca.cn });
+            }
+            
+            // Validate that we have a server name
+            if (!caServer) {
+              logger.warn('Could not determine CA server name from LDAP attributes', { ca });
+              // Fallback: try using LDAP hostname (CA might be on DC)
+              if (cfg.auth?.ldapHost) {
+                const ldapHost = cfg.auth.ldapHost.replace(/^ldaps?:\/\//, '').split(':')[0];
+                logger.info('Using LDAP host as CA server fallback', { caServer: ldapHost });
+                return {
+                  caServer: ldapHost,
+                  templateName: 'WebServer',
+                  found: true
+                };
+              }
+              return null;
+            }
+            
             return {
-              caServer: ca.dnsHostName || ca.cn,
+              caServer: caServer,
               templateName: 'WebServer', // Default template
               found: true
             };
@@ -278,11 +362,40 @@ async function performKerberosHandshake(caServer) {
 /**
  * Generate Certificate Signing Request (CSR) using OpenSSL
  */
-async function generateCSR(hostname, dnsNames = []) {
+async function generateCSR(hostname, dnsNames = [], ipAddresses = []) {
   // Ensure all DNS names are included
   const allDnsNames = [hostname, ...dnsNames].filter((name, index, self) => self.indexOf(name) === index);
   
+  // Get server's IP addresses if not provided
+  let allIpAddresses = [...ipAddresses];
+  if (allIpAddresses.length === 0) {
+    const interfaces = os.networkInterfaces();
+    Object.values(interfaces).forEach((entries) => {
+      entries?.forEach((entry) => {
+        if (entry.family === 'IPv4' && !entry.internal) {
+          allIpAddresses.push(entry.address);
+        }
+      });
+    });
+  }
+  // Remove duplicates
+  allIpAddresses = [...new Set(allIpAddresses)];
+  
   // Create OpenSSL config for CSR with SAN
+  const altNames = [];
+  let dnsIndex = 1;
+  let ipIndex = 1;
+  
+  allDnsNames.forEach((dns) => {
+    altNames.push(`DNS.${dnsIndex} = ${dns}`);
+    dnsIndex++;
+  });
+  
+  allIpAddresses.forEach((ip) => {
+    altNames.push(`IP.${ipIndex} = ${ip}`);
+    ipIndex++;
+  });
+  
   const opensslConfig = `[req]
 distinguished_name = req_distinguished_name
 req_extensions = v3_req
@@ -297,7 +410,7 @@ extendedKeyUsage = serverAuth
 subjectAltName = @alt_names
 
 [alt_names]
-${allDnsNames.map((dns, i) => `DNS.${i + 1} = ${dns}`).join('\n')}
+${altNames.join('\n')}
 `;
   
   const configFile = path.join(CERT_DIR, 'csr.conf');
@@ -330,7 +443,17 @@ ${allDnsNames.map((dns, i) => `DNS.${i + 1} = ${dns}`).join('\n')}
 async function submitCSRToCA(csrPath, caServer, templateName = 'WebServer') {
   const csrContent = fs.readFileSync(csrPath, 'utf8');
   
-  // Method 1: Try AD CS Web Enrollment API
+  // Method 1: Try curl with --negotiate (uses system GSS-API, works better on Linux)
+  try {
+    const cert = await requestViaCurl(csrContent, caServer, templateName);
+    if (cert) {
+      return cert;
+    }
+  } catch (error) {
+    logger.debug('curl enrollment failed, trying alternative methods', { error: error.message });
+  }
+  
+  // Method 2: Try AD CS Web Enrollment API (Node.js kerberos package)
   try {
     const cert = await requestViaWebEnrollment(csrContent, caServer, templateName);
     if (cert) {
@@ -340,7 +463,7 @@ async function submitCSRToCA(csrPath, caServer, templateName = 'WebServer') {
     logger.debug('Web enrollment failed, trying alternative methods', { error: error.message });
   }
   
-  // Method 2: Try certreq.exe via Wine (if available)
+  // Method 3: Try certreq.exe via Wine (if available)
   try {
     const cert = await requestViaCertreq(csrPath, caServer, templateName);
     if (cert) {
@@ -350,12 +473,256 @@ async function submitCSRToCA(csrPath, caServer, templateName = 'WebServer') {
     logger.debug('certreq.exe method failed', { error: error.message });
   }
   
-  // Method 3: Fallback - return instructions for manual request
+  // Method 4: Fallback - return instructions for manual request
   throw new Error(`Automatic certificate enrollment failed. Please manually request a certificate:
 1. Use MMC Certificate snap-in on a Windows machine
 2. Or visit http://${caServer}/certsrv for web enrollment
 3. Submit the CSR file: ${csrPath}
 4. Download the certificate and save it to: ${CERT_FILE}`);
+}
+
+/**
+ * Request certificate via curl with --negotiate (uses system GSS-API)
+ * This method works better on Linux systems where Kerberos is configured via system libraries
+ */
+async function requestViaCurl(csrContent, caServer, templateName) {
+  // Check if curl is available
+  try {
+    execSync('curl --version', { encoding: 'utf8', stdio: 'pipe' });
+  } catch (e) {
+    logger.debug('curl not available');
+    return null;
+  }
+
+  try {
+    const credentials = getServiceAccountCredentials();
+    const enrollmentUrl = `http://${caServer}/certsrv/certfnsh.asp`;
+
+    // Extract raw base64 body from CSR (remove PEM headers/footers/whitespace)
+    const csrBody = csrContent
+      .replace(/-----BEGIN CERTIFICATE REQUEST-----/g, '')
+      .replace(/-----END CERTIFICATE REQUEST-----/g, '')
+      .replace(/\s+/g, '');
+
+    if (!csrBody || csrBody.length === 0) {
+      logger.warn('CSR body extraction failed; CSR content may be invalid');
+      return null;
+    }
+
+    // Build URL-encoded payload
+    const formParams = new URLSearchParams();
+    formParams.set('Mode', 'newreq');
+    formParams.set('CertRequest', csrBody);
+    formParams.set('CertAttrib', `CertificateTemplate:${templateName}`);
+    formParams.set('TargetStoreFlags', '0');
+    formParams.set('SaveCert', 'yes');
+
+    // Create form data file for curl
+    const formDataFile = path.join(CERT_DIR, 'formdata.txt');
+    fs.writeFileSync(formDataFile, formParams.toString());
+    
+    // Try multiple authentication methods in order of preference
+    // Method 1: NTLM (simplest, works without Kerberos setup)
+    // Method 2: Basic auth (if AD CS allows it)
+    const username = `${credentials.domain}\\${credentials.user}`;
+    const password = credentials.password;
+    const cookieJar = path.join(CERT_DIR, 'cookies.txt');
+    
+    // Clean up any existing cookie jar
+    try { fs.unlinkSync(cookieJar); } catch (e) {}
+    
+    const authMethods = [
+      { flag: '--ntlm', name: 'NTLM' },
+      { flag: '--basic', name: 'Basic' }
+    ];
+    
+    for (const method of authMethods) {
+      try {
+        logger.debug(`Trying ${method.name} authentication`);
+        
+        // Build curl command with appropriate auth flags
+        let authArgs = '';
+        if (method.flag === '--ntlm') {
+          authArgs = '--ntlm';
+        }
+        // For basic auth, we just use -u flag without special auth flag
+        
+        // First, authenticate and get session cookie
+        const curlCmd1 = `curl -s -L ${authArgs} -u "${username}:${password}" -c "${cookieJar}" -b "${cookieJar}" "http://${caServer}/certsrv/"`;
+        
+        execSync(curlCmd1, {
+          encoding: 'utf8',
+          stdio: 'pipe',
+          timeout: 30000,
+          shell: true
+        });
+        
+        // Check if we got a cookie (authentication worked)
+        if (!fs.existsSync(cookieJar) || fs.readFileSync(cookieJar, 'utf8').trim().length === 0) {
+          logger.debug(`${method.name} auth failed, no cookie received`);
+          continue;
+        }
+        
+        // Then submit the CSR
+        const curlCmd2 = `curl -s -L ${authArgs} -u "${username}:${password}" -b "${cookieJar}" -c "${cookieJar}" -X POST -H "Content-Type: application/x-www-form-urlencoded" --data-binary "@${formDataFile}" "${enrollmentUrl}"`;
+        
+        const response = execSync(curlCmd2, {
+          encoding: 'utf8',
+          stdio: 'pipe',
+          timeout: 30000,
+          shell: true
+        });
+        
+        // Save response for debugging (first 10000 chars)
+        const debugFile = path.join(CERT_DIR, `enrollment-response-${method.name.toLowerCase()}.html`);
+        try {
+          fs.writeFileSync(debugFile, response.substring(0, 10000));
+          logger.debug(`Saved enrollment response (first 10k chars)`, { file: debugFile });
+        } catch (e) {
+          // Ignore file write errors
+        }
+        
+        // Parse response to extract certificate - try multiple methods
+        let certificate = null;
+        
+        // Method 1: Direct certificate in response (BEGIN/END CERTIFICATE)
+        const certMatch = response.match(/-----BEGIN CERTIFICATE-----[\s\S]*?-----END CERTIFICATE-----/);
+        if (certMatch) {
+          certificate = certMatch[0].trim();
+          logger.debug('Found certificate via direct match', { length: certificate.length });
+        }
+        
+        // Method 2: Certificate in textarea (various IDs and attributes)
+        if (!certificate) {
+          const textareaPatterns = [
+            /<textarea[^>]*id="certnew"[^>]*>([\s\S]*?)<\/textarea>/i,
+            /<textarea[^>]*id="req"[^>]*>([\s\S]*?)<\/textarea>/i,
+            /<textarea[^>]*name="certnew"[^>]*>([\s\S]*?)<\/textarea>/i,
+            /<textarea[^>]*>([\s\S]*?-----BEGIN CERTIFICATE-----[\s\S]*?-----END CERTIFICATE-----[\s\S]*?)<\/textarea>/i
+          ];
+          
+          for (const pattern of textareaPatterns) {
+            const match = response.match(pattern);
+            if (match) {
+              const text = match[1].trim();
+              if (text.includes('BEGIN CERTIFICATE')) {
+                certificate = text;
+                logger.debug('Found certificate in textarea', { pattern: pattern.toString() });
+                break;
+              }
+            }
+          }
+        }
+        
+        // Method 3: Certificate in pre tag
+        if (!certificate) {
+          const prePatterns = [
+            /<pre[^>]*id="certnew"[^>]*>([\s\S]*?)<\/pre>/i,
+            /<pre[^>]*>([\s\S]*?-----BEGIN CERTIFICATE-----[\s\S]*?-----END CERTIFICATE-----[\s\S]*?)<\/pre>/i
+          ];
+          
+          for (const pattern of prePatterns) {
+            const match = response.match(pattern);
+            if (match) {
+              const text = match[1].trim();
+              if (text.includes('BEGIN CERTIFICATE')) {
+                certificate = text;
+                logger.debug('Found certificate in pre tag', { pattern: pattern.toString() });
+                break;
+              }
+            }
+          }
+        }
+        
+        // Method 4: Certificate in a div or other container
+        if (!certificate) {
+          const divPattern = /<div[^>]*>([\s\S]*?-----BEGIN CERTIFICATE-----[\s\S]*?-----END CERTIFICATE-----[\s\S]*?)<\/div>/i;
+          const match = response.match(divPattern);
+          if (match) {
+            certificate = match[1].trim();
+            logger.debug('Found certificate in div');
+          }
+        }
+        
+        // Method 5: Check if response contains a link to download certificate
+        // AD CS sometimes redirects or provides a download link
+        if (!certificate) {
+          const downloadLink = response.match(/href="([^"]*certnew[^"]*)"/i) || 
+                              response.match(/href="([^"]*certcarc[^"]*)"/i) ||
+                              response.match(/href="([^"]*cert[^"]*\.cer[^"]*)"/i);
+          
+          if (downloadLink) {
+            const downloadUrl = downloadLink[1].startsWith('http') 
+              ? downloadLink[1] 
+              : `http://${caServer}${downloadLink[1].startsWith('/') ? '' : '/certsrv/'}${downloadLink[1]}`;
+            
+            logger.debug('Found certificate download link', { url: downloadUrl });
+            
+            // Try to download the certificate
+            try {
+              const certDownloadCmd = `curl -s -L ${authArgs} -u "${username}:${password}" -b "${cookieJar}" -c "${cookieJar}" "${downloadUrl}"`;
+              const certResponse = execSync(certDownloadCmd, {
+                encoding: 'utf8',
+                stdio: 'pipe',
+                timeout: 30000,
+                shell: true
+              });
+              
+              const certDownloadMatch = certResponse.match(/-----BEGIN CERTIFICATE-----[\s\S]*?-----END CERTIFICATE-----/);
+              if (certDownloadMatch) {
+                certificate = certDownloadMatch[0].trim();
+                logger.debug('Downloaded certificate from link');
+              }
+            } catch (e) {
+              logger.debug('Failed to download certificate from link', { error: e.message });
+            }
+          }
+        }
+        
+        // Clean up certificate text (remove HTML entities, decode)
+        if (certificate) {
+          certificate = certificate
+            .replace(/&nbsp;/g, ' ')
+            .replace(/&lt;/g, '<')
+            .replace(/&gt;/g, '>')
+            .replace(/&amp;/g, '&')
+            .replace(/\r\n/g, '\n')
+            .replace(/\r/g, '\n')
+            .trim();
+          
+          // Verify it's a valid certificate
+          if (certificate.includes('-----BEGIN CERTIFICATE-----') && 
+              certificate.includes('-----END CERTIFICATE-----')) {
+            logger.info(`Certificate retrieved via curl with ${method.name} authentication`);
+            fs.unlinkSync(formDataFile);
+            try { fs.unlinkSync(cookieJar); } catch (e) {}
+            try { fs.unlinkSync(debugFile); } catch (e) {} // Clean up debug file on success
+            return certificate;
+          }
+        }
+        
+        logger.debug(`${method.name} enrollment completed but no certificate found in response`, {
+          responseLength: response.length,
+          hasCertNew: response.includes('certnew'),
+          hasBeginCert: response.includes('BEGIN CERTIFICATE'),
+          responsePreview: response.substring(0, 500)
+        });
+      } catch (curlError) {
+        logger.debug(`${method.name} authentication failed`, { error: curlError.message });
+        // Continue to next method
+        continue;
+      }
+    }
+    
+    // Clean up
+    fs.unlinkSync(formDataFile);
+    try { fs.unlinkSync(cookieJar); } catch (e) {}
+    
+  } catch (error) {
+    logger.debug('curl enrollment method failed', { error: error.message });
+  }
+  
+  return null;
 }
 
 /**
@@ -367,9 +734,15 @@ async function requestViaWebEnrollment(csrContent, caServer, templateName) {
   try {
     const { authHeader, cookieHeader } = await performKerberosHandshake(caServer);
     const enrollmentUrl = `http://${caServer}/certsrv/certfnsh.asp`;
+
+    const csrBody = csrContent
+      .replace(/-----BEGIN CERTIFICATE REQUEST-----/g, '')
+      .replace(/-----END CERTIFICATE REQUEST-----/g, '')
+      .replace(/\s+/g, '');
+
     const body = new URLSearchParams({
       Mode: 'newreq',
-      CertRequest: Buffer.from(csrContent).toString('base64'),
+      CertRequest: csrBody,
       CertAttrib: `CertificateTemplate:${templateName}`,
       TargetStoreFlags: '0',
       SaveCert: 'yes'
@@ -506,7 +879,32 @@ export async function requestCertificate(dnsNames = []) {
     throw new Error('Certificate Authority not found. Run the certificate server setup script first.');
   }
   
-  logger.info('Requesting certificate from CA', { caServer: caInfo.caServer, hostname, templateName: caInfo.templateName });
+  // Get domain from config to construct FQDN
+  const config = loadConfig();
+  const domain = inferDomain(config);
+  
+  // Build list of DNS names to include in certificate
+  const allDnsNames = [hostname, ...dnsNames];
+  
+  // If we have a domain and the hostname doesn't already include it, add the FQDN
+  if (domain && !hostname.includes('.')) {
+    const fqdn = `${hostname}.${domain.toLowerCase()}`;
+    if (!allDnsNames.includes(fqdn)) {
+      allDnsNames.push(fqdn);
+      logger.debug('Adding FQDN to certificate', { fqdn, hostname, domain });
+    }
+  }
+  
+  // Remove duplicates
+  const uniqueDnsNames = [...new Set(allDnsNames)];
+  
+  logger.info('Requesting certificate from CA', { 
+    caServer: caInfo.caServer, 
+    hostname, 
+    fqdn: uniqueDnsNames.find(d => d.includes('.')),
+    dnsNames: uniqueDnsNames,
+    templateName: caInfo.templateName 
+  });
   
   // Check if OpenSSL is available
   try {
@@ -516,8 +914,8 @@ export async function requestCertificate(dnsNames = []) {
   }
   
   try {
-    // Step 1: Generate CSR
-    const { csrPath, keyPath } = await generateCSR(hostname, dnsNames);
+    // Step 1: Generate CSR (includes IP addresses and FQDN automatically)
+    const { csrPath, keyPath } = await generateCSR(hostname, uniqueDnsNames);
     
           // Step 2: Submit CSR to CA
       const certContent = await submitCSRToCA(csrPath, caInfo.caServer, caInfo.templateName);

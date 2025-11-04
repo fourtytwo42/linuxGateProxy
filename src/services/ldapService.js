@@ -225,8 +225,43 @@ export async function withServiceClient(fn, { rejectUnauthorized = false } = {})
   }
 }
 
-export async function findUser(identifier, { attributes = [] } = {}) {
-  return withServiceClient(async (client, config) => {
+/**
+ * Execute LDAP operations using authenticated user's credentials
+ * Falls back to service account if user password is not available (e.g., WebAuthn login)
+ */
+export async function withUserClient(fn, userDn, password, { rejectUnauthorized = false } = {}) {
+  const config = loadConfig();
+  const client = createClient(config, { rejectUnauthorized });
+  
+  // If password is available, use user credentials; otherwise fall back to service account
+  if (password && userDn) {
+    try {
+      await client.bind(userDn, password);
+      return await fn(client, config);
+    } catch (error) {
+      logger.warn('User credentials bind failed, falling back to service account', { 
+        userDn, 
+        error: error.message 
+      });
+      // Fall back to service account
+      await bindServiceAccount(client, config);
+      return await fn(client, config);
+    } finally {
+      await client.unbind().catch(() => {});
+    }
+  } else {
+    // No password available, use service account
+    try {
+      await bindServiceAccount(client, config);
+      return await fn(client, config);
+    } finally {
+      await client.unbind().catch(() => {});
+    }
+  }
+}
+
+export async function findUser(identifier, { attributes = [], userCredentials = null } = {}) {
+  const executor = async (client, config) => {
     const { type, value } = normalizeIdentifier(identifier);
     const filterParts = [
       `(sAMAccountName=${escapeFilterValue(value)})`,
@@ -255,7 +290,12 @@ export async function findUser(identifier, { attributes = [] } = {}) {
 
     const result = await client.search(config.auth.baseDn, searchOptions);
     return result.searchEntries[0] ?? null;
-  });
+  };
+  
+  if (userCredentials && userCredentials.userDn && userCredentials.password) {
+    return withUserClient(executor, userCredentials.userDn, userCredentials.password);
+  }
+  return withServiceClient(executor);
 }
 
 export async function validateCredentials(userDn, password, configOverride) {
@@ -296,8 +336,8 @@ export function userHasGroup(userEntry, groupDns) {
          });
 }
 
-export async function updateUserAttribute(userDn, attribute, value) {
-  return withServiceClient(async (client) => {
+export async function updateUserAttribute(userDn, attribute, value, userCredentials = null) {
+  const executor = async (client) => {
     const change = value === null || value === undefined
       ? new Change({
         operation: 'delete',
@@ -308,7 +348,12 @@ export async function updateUserAttribute(userDn, attribute, value) {
         modification: new Attribute({ type: attribute, values: [value] })
       });
     await client.modify(userDn, [change]);
-  });
+  };
+  
+  if (userCredentials && userCredentials.userDn && userCredentials.password) {
+    return withUserClient(executor, userCredentials.userDn, userCredentials.password);
+  }
+  return withServiceClient(executor);
 }
 
 export async function readUserAttribute(userDn, attribute) {
@@ -325,8 +370,8 @@ export async function readUserAttribute(userDn, attribute) {
   });
 }
 
-export async function resetPassword(userDn, newPassword) {
-  return withServiceClient(async (client) => {
+export async function resetPassword(userDn, newPassword, userCredentials = null) {
+  const executor = async (client) => {
     const pwd = `"${newPassword}"`;
     const encoded = Buffer.from(pwd, 'utf16le');
     await client.modify(userDn, [
@@ -335,22 +380,32 @@ export async function resetPassword(userDn, newPassword) {
         modification: new Attribute({ type: 'unicodePwd', values: [encoded] })
       })
     ]);
-  }, { rejectUnauthorized: false });
+  };
+  
+  if (userCredentials && userCredentials.userDn && userCredentials.password) {
+    return withUserClient(executor, userCredentials.userDn, userCredentials.password, { rejectUnauthorized: false });
+  }
+  return withServiceClient(executor, { rejectUnauthorized: false });
 }
 
-export async function unlockAccount(userDn) {
-  return withServiceClient(async (client) => {
+export async function unlockAccount(userDn, userCredentials = null) {
+  const executor = async (client) => {
     await client.modify(userDn, [
       new Change({
         operation: 'replace',
         modification: new Attribute({ type: 'lockoutTime', values: ['0'] })
       })
     ]);
-  });
+  };
+  
+  if (userCredentials && userCredentials.userDn && userCredentials.password) {
+    return withUserClient(executor, userCredentials.userDn, userCredentials.password);
+  }
+  return withServiceClient(executor);
 }
 
-export async function disableAccount(userDn) {
-  return withServiceClient(async (client) => {
+export async function disableAccount(userDn, userCredentials = null) {
+  const executor = async (client) => {
     const result = await client.search(userDn, {
       scope: 'base',
       attributes: ['userAccountControl']
@@ -368,11 +423,16 @@ export async function disableAccount(userDn) {
         modification: new Attribute({ type: 'userAccountControl', values: [String(updated)] })
       })
     ]);
-  });
+  };
+  
+  if (userCredentials && userCredentials.userDn && userCredentials.password) {
+    return withUserClient(executor, userCredentials.userDn, userCredentials.password);
+  }
+  return withServiceClient(executor);
 }
 
-export async function enableAccount(userDn) {
-  return withServiceClient(async (client) => {
+export async function enableAccount(userDn, userCredentials = null) {
+  const executor = async (client) => {
     const result = await client.search(userDn, {
       scope: 'base',
       attributes: ['userAccountControl']
@@ -390,11 +450,16 @@ export async function enableAccount(userDn) {
         modification: new Attribute({ type: 'userAccountControl', values: [String(updated)] })
       })
     ]);
-  });
+  };
+  
+  if (userCredentials && userCredentials.userDn && userCredentials.password) {
+    return withUserClient(executor, userCredentials.userDn, userCredentials.password);
+  }
+  return withServiceClient(executor);
 }
 
-export async function searchUsers({ query, size = 25, page = 1 }) {
-  return withServiceClient(async (client, config) => {
+export async function searchUsers({ query, size = 25, page = 1, userCredentials = null } = {}) {
+  const executor = async (client, config) => {
     const filterValue = escapeFilterValue(query || '*');
     // Filter out computer objects - they also have objectClass=user but we only want actual users
     // Also filter out built-in accounts: Guest, Administrator, krbtgt, and accounts starting with $ (service/computer accounts)
@@ -425,11 +490,16 @@ export async function searchUsers({ query, size = 25, page = 1 }) {
     });
     
     return filteredEntries;
-  });
+  };
+  
+  if (userCredentials && userCredentials.userDn && userCredentials.password) {
+    return withUserClient(executor, userCredentials.userDn, userCredentials.password);
+  }
+  return withServiceClient(executor);
 }
 
-export async function searchGroups({ query, size = 50, page = 1 }) {
-  return withServiceClient(async (client, config) => {
+export async function searchGroups({ query, size = 50, page = 1, userCredentials = null } = {}) {
+  const executor = async (client, config) => {
     const filterValue = escapeFilterValue(query || '*');
     // Search for groups - most common objectClass is 'group'
     const baseFilter = '(objectClass=group)';
@@ -448,11 +518,16 @@ export async function searchGroups({ query, size = 50, page = 1 }) {
       attributes: ['distinguishedName', 'cn', 'name', 'sAMAccountName', 'description']
     });
     return result.searchEntries;
-  });
+  };
+  
+  if (userCredentials && userCredentials.userDn && userCredentials.password) {
+    return withUserClient(executor, userCredentials.userDn, userCredentials.password);
+  }
+  return withServiceClient(executor);
 }
 
-export async function updateContactInfo(userDn, fields) {
-  return withServiceClient(async (client) => {
+export async function updateContactInfo(userDn, fields, userCredentials = null) {
+  const executor = async (client) => {
     const changes = Object.entries(fields)
       .filter(([, value]) => value !== undefined)
       .map(([type, value]) => (value
@@ -468,7 +543,12 @@ export async function updateContactInfo(userDn, fields) {
       return;
     }
     await client.modify(userDn, changes);
-  });
+  };
+  
+  if (userCredentials && userCredentials.userDn && userCredentials.password) {
+    return withUserClient(executor, userCredentials.userDn, userCredentials.password);
+  }
+  return withServiceClient(executor);
 }
 
 export async function readSessionInfo(userDn) {
@@ -521,8 +601,8 @@ export async function clearSessionInfo(userDn) {
   });
 }
 
-export async function readWebAuthnCredentials(userDn) {
-  return withServiceClient(async (client, config) => {
+export async function readWebAuthnCredentials(userDn, userCredentials = null) {
+  const executor = async (client, config) => {
     const attr = config.auth.webAuthnAttribute;
     const result = await client.search(userDn, {
       scope: 'base',
@@ -551,11 +631,16 @@ export async function readWebAuthnCredentials(userDn) {
       logger.error('Failed to parse WebAuthn credentials', { error: error.message });
       return [];
     }
-  });
+  };
+  
+  if (userCredentials && userCredentials.userDn && userCredentials.password) {
+    return withUserClient(executor, userCredentials.userDn, userCredentials.password);
+  }
+  return withServiceClient(executor);
 }
 
-export async function writeWebAuthnCredentials(userDn, credentials) {
-  return withServiceClient(async (client, config) => {
+export async function writeWebAuthnCredentials(userDn, credentials, userCredentials = null) {
+  const executor = async (client, config) => {
     const attr = config.auth.webAuthnAttribute;
     const serialized = JSON.stringify(credentials ?? []);
     await client.modify(userDn, [
@@ -564,10 +649,15 @@ export async function writeWebAuthnCredentials(userDn, credentials) {
         modification: new Attribute({ type: attr, values: [serialized] })
       })
     ]);
-  });
+  };
+  
+  if (userCredentials && userCredentials.userDn && userCredentials.password) {
+    return withUserClient(executor, userCredentials.userDn, userCredentials.password);
+  }
+  return withServiceClient(executor);
 }
 
-export async function createUser(userData, configOverride) {
+export async function createUser(userData, configOverride, userCredentials = null) {
   const config = configOverride ?? loadConfig();
   const client = createClient(config);
   
@@ -617,8 +707,13 @@ export async function createUser(userData, configOverride) {
       attributes.push(new Attribute({ type: 'telephoneNumber', values: [userData.telephoneNumber] }));
     }
     
-    // Create the user (without password first)
-    await client.bind(config.auth.lookupUser, getBindPassword());
+    // Bind with user credentials if available, otherwise use service account
+    if (userCredentials && userCredentials.userDn && userCredentials.password) {
+      await client.bind(userCredentials.userDn, userCredentials.password);
+    } else {
+      await client.bind(config.auth.lookupUser, getBindPassword());
+    }
+    
     await client.add(userDn, attributes);
     
     // Set password - unicodePwd must be UTF-16LE encoded and wrapped in quotes

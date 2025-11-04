@@ -59,7 +59,9 @@ async function finalizeLogin(res, pending, req) {
     returnUrl: pending.returnUrl
   });
   try {
-    const token = await ensureSession(pending.user);
+    // Store password encrypted in session for admin operations
+    const password = pending.credentials?.password || null;
+    const token = await ensureSession(pending.user, password);
     logger.debug('Session token created', { token: token.substring(0, 20) + '...' });
     
     const config = loadConfig();

@@ -22,6 +22,17 @@ import { getCertificateStatus, requestCertificate } from '../services/certServic
 
 const router = Router();
 
+// Helper function to extract user credentials from request for LDAP operations
+function getUserCredentials(req) {
+  if (!req.auth?.user || !req.auth?.password) {
+    return null;
+  }
+  return {
+    userDn: req.auth.user.distinguishedName || req.auth.user.dn,
+    password: req.auth.password
+  };
+}
+
 // Middleware to check if admin portal should be accessible via Cloudflare tunnel
 router.use('/gateProxyAdmin', (req, res, next) => {
   const config = loadConfig();
@@ -174,7 +185,8 @@ router.delete('/gateProxyAdmin/api/resources/:id', requireAdmin, (req, res) => {
 router.get('/gateProxyAdmin/api/users', requireAdmin, async (req, res, next) => {
   try {
     const { query = '', page = 1, size = 25 } = req.query;
-    const users = await searchUsers({ query, page: Number(page), size: Number(size) });
+    const userCreds = getUserCredentials(req);
+    const users = await searchUsers({ query, page: Number(page), size: Number(size), userCredentials: userCreds });
     
     // Enrich each user with lock status and WebAuthn status
     const enrichedUsers = await Promise.all(users.map(async (user) => {
@@ -185,7 +197,7 @@ router.get('/gateProxyAdmin/api/users', requireAdmin, async (req, res, next) => 
       // Check WebAuthn credentials
       let hasWebAuthn = false;
       try {
-        const credentials = await readWebAuthnCredentials(userDn);
+        const credentials = await readWebAuthnCredentials(userDn, userCreds);
         hasWebAuthn = credentials && credentials.length > 0;
       } catch (error) {
         // If we can't read WebAuthn, assume false
@@ -223,7 +235,8 @@ router.post('/gateProxyAdmin/api/users', requireAdmin, async (req, res, next) =>
     }
 
     // Check if user already exists
-    const existingUser = await findUser(sAMAccountName);
+    const userCreds = getUserCredentials(req);
+    const existingUser = await findUser(sAMAccountName, { attributes: [], userCredentials: userCreds });
     if (existingUser) {
       return res.status(409).json({ error: 'User already exists' });
     }
@@ -239,7 +252,7 @@ router.post('/gateProxyAdmin/api/users', requireAdmin, async (req, res, next) =>
       enabled
     };
 
-    const result = await createUser(userData);
+    const result = await createUser(userData, null, userCreds);
     res.json({ success: true, user: result });
   } catch (error) {
     next(error);
@@ -249,7 +262,8 @@ router.post('/gateProxyAdmin/api/users', requireAdmin, async (req, res, next) =>
 router.get('/gateProxyAdmin/api/groups', requireAdmin, async (req, res, next) => {
   try {
     const { query = '', page = 1, size = 50 } = req.query;
-    const groups = await searchGroups({ query, page: Number(page), size: Number(size) });
+    const userCreds = getUserCredentials(req);
+    const groups = await searchGroups({ query, page: Number(page), size: Number(size), userCredentials: userCreds });
     res.json({ groups });
   } catch (error) {
     next(error);
@@ -258,7 +272,8 @@ router.get('/gateProxyAdmin/api/groups', requireAdmin, async (req, res, next) =>
 
 router.get('/gateProxyAdmin/api/users/:sam', requireAdmin, async (req, res, next) => {
   try {
-    const user = await findUser(req.params.sam, { attributes: ['memberOf', 'mail', 'displayName', 'telephoneNumber'] });
+    const userCreds = getUserCredentials(req);
+    const user = await findUser(req.params.sam, { attributes: ['memberOf', 'mail', 'displayName', 'telephoneNumber'], userCredentials: userCreds });
     if (!user) {
       return res.status(404).json({ error: 'User not found' });
     }
@@ -270,7 +285,8 @@ router.get('/gateProxyAdmin/api/users/:sam', requireAdmin, async (req, res, next
 
 router.patch('/gateProxyAdmin/api/users/:sam', requireAdmin, async (req, res, next) => {
   try {
-    const user = await findUser(req.params.sam);
+    const userCreds = getUserCredentials(req);
+    const user = await findUser(req.params.sam, { attributes: [], userCredentials: userCreds });
     if (!user) {
       return res.status(404).json({ error: 'User not found' });
     }
@@ -287,7 +303,7 @@ router.patch('/gateProxyAdmin/api/users/:sam', requireAdmin, async (req, res, ne
     if (req.body.telephoneNumber !== undefined) {
       updateFields.telephoneNumber = req.body.telephoneNumber;
     }
-    await updateContactInfo(user.distinguishedName || user.dn, updateFields);
+    await updateContactInfo(user.distinguishedName || user.dn, updateFields, userCreds);
     res.json({ success: true });
   } catch (error) {
     next(error);
@@ -296,14 +312,15 @@ router.patch('/gateProxyAdmin/api/users/:sam', requireAdmin, async (req, res, ne
 
 router.post('/gateProxyAdmin/api/users/:sam/reset-password', requireAdmin, async (req, res, next) => {
   try {
-    const user = await findUser(req.params.sam);
+    const userCreds = getUserCredentials(req);
+    const user = await findUser(req.params.sam, { attributes: [], userCredentials: userCreds });
     if (!user) {
       return res.status(404).json({ error: 'User not found' });
     }
     const userDn = user.distinguishedName || user.dn;
-    await resetPassword(userDn, req.body.newPassword);
+    await resetPassword(userDn, req.body.newPassword, userCreds);
     // Also unlock the user when resetting password
-    await unlockAccount(userDn);
+    await unlockAccount(userDn, userCreds);
     res.json({ success: true });
   } catch (error) {
     next(error);
@@ -312,12 +329,13 @@ router.post('/gateProxyAdmin/api/users/:sam/reset-password', requireAdmin, async
 
 router.post('/gateProxyAdmin/api/users/:sam/unlock', requireAdmin, async (req, res, next) => {
   try {
-    const user = await findUser(req.params.sam);
+    const userCreds = getUserCredentials(req);
+    const user = await findUser(req.params.sam, { attributes: [], userCredentials: userCreds });
     if (!user) {
       return res.status(404).json({ error: 'User not found' });
     }
-    await unlockAccount(user.distinguishedName || user.dn);
-    await enableAccount(user.distinguishedName || user.dn);
+    await unlockAccount(user.distinguishedName || user.dn, userCreds);
+    await enableAccount(user.distinguishedName || user.dn, userCreds);
     res.json({ success: true });
   } catch (error) {
     next(error);
@@ -326,11 +344,12 @@ router.post('/gateProxyAdmin/api/users/:sam/unlock', requireAdmin, async (req, r
 
 router.post('/gateProxyAdmin/api/users/:sam/enable', requireAdmin, async (req, res, next) => {
   try {
-    const user = await findUser(req.params.sam);
+    const userCreds = getUserCredentials(req);
+    const user = await findUser(req.params.sam, { attributes: [], userCredentials: userCreds });
     if (!user) {
       return res.status(404).json({ error: 'User not found' });
     }
-    await enableAccount(user.distinguishedName || user.dn);
+    await enableAccount(user.distinguishedName || user.dn, userCreds);
     res.json({ success: true });
   } catch (error) {
     next(error);
@@ -339,11 +358,12 @@ router.post('/gateProxyAdmin/api/users/:sam/enable', requireAdmin, async (req, r
 
 router.post('/gateProxyAdmin/api/users/:sam/disable', requireAdmin, async (req, res, next) => {
   try {
-    const user = await findUser(req.params.sam);
+    const userCreds = getUserCredentials(req);
+    const user = await findUser(req.params.sam, { attributes: [], userCredentials: userCreds });
     if (!user) {
       return res.status(404).json({ error: 'User not found' });
     }
-    await disableAccount(user.distinguishedName || user.dn);
+    await disableAccount(user.distinguishedName || user.dn, userCreds);
     res.json({ success: true });
   } catch (error) {
     next(error);
@@ -352,11 +372,12 @@ router.post('/gateProxyAdmin/api/users/:sam/disable', requireAdmin, async (req, 
 
 router.post('/gateProxyAdmin/api/users/:sam/reset-webauthn', requireAdmin, async (req, res, next) => {
   try {
-    const user = await findUser(req.params.sam);
+    const userCreds = getUserCredentials(req);
+    const user = await findUser(req.params.sam, { attributes: [], userCredentials: userCreds });
     if (!user) {
       return res.status(404).json({ error: 'User not found' });
     }
-    await writeWebAuthnCredentials(user.distinguishedName || user.dn, []);
+    await writeWebAuthnCredentials(user.distinguishedName || user.dn, [], userCreds);
     res.json({ success: true });
   } catch (error) {
     next(error);
