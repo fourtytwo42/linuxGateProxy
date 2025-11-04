@@ -126,6 +126,10 @@ function populateSettingsForm() {
   settingsForm.sessionHours.value = settings.site.sessionHours || 8;
   settingsForm.enableOtp.checked = settings.site.enableOtp;
   settingsForm.enableWebAuthn.checked = settings.site.enableWebAuthn;
+  const exposeToInternetCheckbox = document.getElementById('exposeToInternet');
+  if (exposeToInternetCheckbox) {
+    exposeToInternetCheckbox.checked = settings.adminPortal?.exposeToInternet || false;
+  }
   // Groups are loaded separately via loadGroupsFromSettings()
   loadGroupsFromSettings();
 }
@@ -313,6 +317,15 @@ settingsForm.addEventListener('submit', async (event) => {
     await postJson('/gateProxyAdmin/api/settings/auth', {
       adminGroupDns: payload.adminGroupDns
     });
+    
+    // Save admin portal settings
+    const exposeToInternetCheckbox = document.getElementById('exposeToInternet');
+    if (exposeToInternetCheckbox) {
+      await postJson('/gateProxyAdmin/api/settings/adminPortal', {
+        exposeToInternet: exposeToInternetCheckbox.checked
+      });
+    }
+    
     showAlert('Settings saved.', 'is-success');
   } catch (error) {
     showAlert(error.message);

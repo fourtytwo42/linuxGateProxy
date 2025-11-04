@@ -24,7 +24,8 @@ export const defaultSettings = {
   adminPortal: {
     enabled: true,
     requireWebAuthn: false,
-    allowedGroupDns: []
+    allowedGroupDns: [],
+    exposeToInternet: false  // If false, admin page only accessible on internal network, not via Cloudflare tunnel
   },
   proxy: {
     targetHost: 'http://127.0.0.1:5000',

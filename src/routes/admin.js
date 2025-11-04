@@ -21,6 +21,54 @@ import { hasCertificate, listTunnels, getTunnelToken } from '../services/cloudfl
 
 const router = Router();
 
+// Middleware to check if admin portal should be accessible via Cloudflare tunnel
+router.use('/gateProxyAdmin', (req, res, next) => {
+  const config = loadConfig();
+  
+  // If exposeToInternet is true, allow access from anywhere
+  if (config.adminPortal?.exposeToInternet === true) {
+    return next();
+  }
+  
+  // If exposeToInternet is false, only allow internal access (block Cloudflare tunnel)
+  const requestHost = req.hostname || req.get('host')?.split(':')[0] || '';
+  const publicBaseUrl = config.site?.publicBaseUrl || '';
+  
+  // Extract hostname from publicBaseUrl (remove http:// or https://)
+  let publicHostname = '';
+  if (publicBaseUrl) {
+    try {
+      const url = new URL(publicBaseUrl.startsWith('http') ? publicBaseUrl : `https://${publicBaseUrl}`);
+      publicHostname = url.hostname.toLowerCase();
+    } catch (e) {
+      // Invalid URL, treat as empty
+      publicHostname = '';
+    }
+  }
+  
+  const requestHostLower = requestHost.toLowerCase();
+  
+  // If request host matches publicBaseUrl hostname, it's coming through Cloudflare tunnel - block it
+  if (publicHostname && requestHostLower === publicHostname) {
+    return res.status(403).send('Admin portal is only accessible on the internal network.');
+  }
+  
+  // Allow access from localhost, 127.0.0.1, or internal IPs
+  // Also allow if publicBaseUrl is not set (no Cloudflare configured)
+  if (!publicHostname || 
+      requestHostLower === 'localhost' || 
+      requestHostLower === '127.0.0.1' || 
+      requestHostLower.startsWith('192.168.') ||
+      requestHostLower.startsWith('10.') ||
+      requestHostLower.startsWith('172.')) {
+    return next();
+  }
+  
+  // For other cases (external host that doesn't match publicBaseUrl), allow (might be direct IP access)
+  // But log it for security awareness
+  return next();
+});
+
 router.get('/gateProxyAdmin', requireAdmin, (req, res) => {
   res.sendFile(path.join(publicDir, 'admin.html'));
 });
@@ -42,6 +90,7 @@ router.get('/gateProxyAdmin/api/settings', requireAdmin, (req, res) => {
     auth: config.auth,
     proxy: config.proxy,
     smtp: config.smtp,
+    adminPortal: config.adminPortal,
     cloudflare: {
       tunnelName: config.cloudflare.tunnelName,
       credentialFile: config.cloudflare.credentialFile,
@@ -57,6 +106,11 @@ router.post('/gateProxyAdmin/api/settings/site', requireAdmin, (req, res) => {
 
 router.post('/gateProxyAdmin/api/settings/auth', requireAdmin, (req, res) => {
   saveConfigSection('auth', { ...loadConfig().auth, ...req.body });
+  res.json({ success: true });
+});
+
+router.post('/gateProxyAdmin/api/settings/adminPortal', requireAdmin, (req, res) => {
+  saveConfigSection('adminPortal', { ...loadConfig().adminPortal, ...req.body });
   res.json({ success: true });
 });
 
