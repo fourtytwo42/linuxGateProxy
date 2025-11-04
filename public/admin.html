@@ -5,312 +5,264 @@
     <meta http-equiv="X-UA-Compatible" content="IE=edge" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Gate Proxy Administration</title>
-    <link rel="stylesheet" href="/gp-assets/css/bulma.min.css" />
+    <link rel="stylesheet" href="https://unpkg.com/open-props@1.6.14" />
+    <link rel="stylesheet" href="https://unpkg.com/open-props/normalize.min.css" />
+    <link
+      rel="stylesheet"
+      href="https://cdn.jsdelivr.net/npm/@picocss/pico@2/css/pico.min.css"
+      integrity="sha384-z/8ueatf01V4zGEnfe7jyL+9/TQc0tisuxGDdKek7m6eGbQIbEvhCJgYblrBa8Jv"
+      crossorigin="anonymous"
+    />
     <link rel="stylesheet" href="/gp-assets/css/app.css" />
   </head>
   <body>
-    <section class="section">
-      <div class="container">
-        <div class="columns">
-          <div class="column is-3">
-            <aside class="menu">
-              <p class="menu-label">General</p>
-              <ul class="menu-list">
-                <li><a class="is-active" data-view="dashboard">Dashboard</a></li>
-                <li><a data-view="settings">Settings</a></li>
-              </ul>
-              <p class="menu-label">Access</p>
-              <ul class="menu-list">
-                <li><a data-view="resources">Resources</a></li>
-                <li><a data-view="users">Users</a></li>
-              </ul>
-            </aside>
-          </div>
-          <div class="column is-9">
-            <div id="alert" class="notification is-hidden"></div>
-
-            <div id="view-dashboard" class="admin-view is-active">
-              <div class="box">
-                <h1 class="title">Appliance Status</h1>
-                <p class="subtitle">Review high-level configuration.</p>
-                <div id="status-cards" class="columns is-multiline"></div>
-              </div>
-              
-              <div class="box mt-5">
-                <h2 class="title is-4">Setup Scripts</h2>
-                <p class="subtitle is-6">Download and run these scripts on your servers to complete the integration.</p>
-                
-                <div class="columns mt-5">
-                  <div class="column">
-                    <div class="card">
-                      <div class="card-header">
-                        <p class="card-header-title">Domain Controller Setup</p>
-                      </div>
-                      <div class="card-content">
-                        <p class="mb-4">Extends Active Directory schema to add custom attributes for session storage and WebAuthn credentials. Must be run on Schema Master DC with Schema Admin privileges.</p>
-                        <div class="field">
-                          <label class="label">Download Package:</label>
-                          <div class="buttons">
-                            <a href="/share/configure-domain-controller.zip" class="button is-link is-outlined" download>
-                              <span class="icon"><i class="fas fa-download"></i></span>
-                              <span>configure-domain-controller.zip</span>
-                            </a>
-                          </div>
-                          <p class="help">ZIP includes both <code>.bat</code> (auto-elevating) and <code>.ps1</code> scripts.</p>
-                        </div>
-                        <div class="message is-info mt-4">
-                          <div class="message-body">
-                            <p class="has-text-weight-semibold mb-2">Instructions:</p>
-                            <ol class="ml-4" style="list-style-type: decimal;">
-                              <li class="mb-2">Download and extract <code>configure-domain-controller.zip</code> on the Schema Master domain controller</li>
-                              <li class="mb-2">Run <code>configure-domain-controller.bat</code> as Administrator (auto-elevates) or execute the PowerShell script manually</li>
-                              <li class="mb-2">Ensure the executing account is a member of Schema Admins; the script uses the current credentials</li>
-                              <li>Allow the script to finish extending the schema—no additional inputs are required.</li>
-                            </ol>
-                          </div>
-                        </div>
-                      </div>
-                    </div>
-                  </div>
-
-                  <div class="column">
-                    <div class="card">
-                      <div class="card-header">
-                        <p class="card-header-title">Certificate Server Setup</p>
-                      </div>
-                      <div class="card-content">
-                        <p class="mb-4">Configures your certificate authority (AD CS) to issue SSL certificates. Creates certificate templates for automatic certificate enrollment. After setup, Gate Proxy will automatically discover and request certificates.</p>
-                        <div class="field">
-                          <label class="label">Download Package:</label>
-                          <div class="buttons">
-                            <a href="/share/configure-certificate-server.zip" class="button is-link is-outlined" download>
-                              <span class="icon"><i class="fas fa-download"></i></span>
-                              <span>configure-certificate-server.zip</span>
-                            </a>
-                          </div>
-                          <p class="help">ZIP includes both <code>.bat</code> (auto-elevating) and <code>.ps1</code> scripts.</p>
-                        </div>
-                        <div class="message is-info mt-4">
-                          <div class="message-body">
-                            <p class="has-text-weight-semibold mb-2">Instructions:</p>
-                            <ol class="ml-4" style="list-style-type: decimal;">
-                              <li class="mb-2">Download and extract <code>configure-certificate-server.zip</code> on the enterprise CA server</li>
-                              <li class="mb-2">Run <code>configure-certificate-server.bat</code> as Administrator (auto-elevates) or run the PowerShell script manually</li>
-                              <li class="mb-2">Follow the guided prompts to install AD CS roles/features (if missing) and configure the enterprise CA</li>
-                              <li>After completion, Gate Proxy can automatically enroll certificates from this CA.</li>
-                            </ol>
-                          </div>
-                        </div>
-                      </div>
-                    </div>
-                  </div>
-                </div>
-
-                <div class="message is-warning mt-5">
-                  <div class="message-header">
-                    <p>Important Notes</p>
-                  </div>
-                  <div class="message-body">
-                    <ul class="ml-4">
-                      <li>Both scripts require Active Directory and appropriate server roles to be installed</li>
-                      <li>Ensure your account has the necessary permissions (Domain Admin for DC, CA Admin for Certificate Server)</li>
-                      <li>The scripts will prompt for required information during execution</li>
-                      <li>The .bat files automatically run as administrator. You can also run the .ps1 files directly if you prefer</li>
-                    </ul>
-                  </div>
-                </div>
-              </div>
-            </div>
-
-            <div id="view-settings" class="admin-view">
-              <div class="box">
-                <h2 class="title is-4">Configuration</h2>
-                <form id="settings-form">
-                  <h3 class="title is-5">Site</h3>
-                  <div class="columns">
-                    <div class="column">
-                      <div class="field">
-                        <label class="label">Public Base URL</label>
-                        <input class="input" name="publicBaseUrl" />
-                      </div>
-                      <div class="field">
-                        <label class="label">Session Hours</label>
-                        <input class="input" name="sessionHours" type="number" />
-                      </div>
-                    </div>
-                    <div class="column">
-                      <div class="field">
-                        <label class="checkbox">
-                          <input type="checkbox" name="enableOtp" />
-                          Enable OTP
-                        </label>
-                      </div>
-                      <div class="field">
-                        <label class="checkbox">
-                          <input type="checkbox" name="enableWebAuthn" />
-                          Require WebAuthn
-                        </label>
-                      </div>
-                    </div>
-                  </div>
-                  
-                  <h3 class="title is-5">Admin Portal</h3>
-                  <div class="columns">
-                    <div class="column">
-                      <div class="field">
-                        <label class="checkbox">
-                          <input type="checkbox" name="exposeToInternet" id="exposeToInternet" />
-                          <strong>Expose admin portal to internet</strong>
-                        </label>
-                        <p class="help">If unchecked, admin portal is only accessible on the internal network (localhost, internal IP, or server name). If checked, admin portal is accessible via Cloudflare tunnel.</p>
-                      </div>
-                    </div>
-                  </div>
-                  
-                  <h3 class="title is-5">Directory Groups</h3>
-                  <div class="columns">
-                    <div class="column">
-                      <div class="field">
-                        <label class="label">Admin Group DNs</label>
-                        <div class="field has-addons">
-                          <div class="control is-expanded">
-                            <div class="select is-fullwidth">
-                              <select id="admin-group-select" style="width: 100%;">
-                                <option value="">Search for a group...</option>
-                              </select>
-                            </div>
-                          </div>
-                          <div class="control">
-                            <button class="button is-link" type="button" id="admin-group-add">Add</button>
-                          </div>
-                        </div>
-                        <input type="text" class="input mt-2" id="admin-group-search" placeholder="Type to search groups..." />
-                        <div id="admin-groups-list" class="mt-3">
-                          <!-- Selected groups will appear here -->
-                        </div>
-                        <input type="hidden" name="adminGroupDns" id="adminGroupDns" />
-                      </div>
-                    </div>
-                  </div>
-                  <div class="field is-grouped is-justify-content-flex-end">
-                    <div class="control">
-                      <button class="button is-link" type="submit">Save Settings</button>
-                    </div>
-                  </div>
-                </form>
-                
-                <hr class="mt-5 mb-5" />
-                
-                <h3 class="title is-5">Cloudflare Tunnel</h3>
-                <div class="field">
-                  <p class="mb-3">Status: <span id="tunnel-status">Checking...</span></p>
-                  <div class="buttons">
-                    <button class="button is-link" id="connect-tunnel-button">Connect to Existing Tunnel</button>
-                  </div>
-                </div>
-                
-                <hr class="mt-5 mb-5" />
-                
-                <h3 class="title is-5">Certificate Management</h3>
-                <div class="field">
-                  <p class="mb-3"><strong>Certificate Status:</strong> <span id="cert-status-text">Checking...</span></p>
-                  <p class="mb-3"><strong>CA Server:</strong> <span id="cert-ca-text">-</span></p>
-                  <p class="mb-3"><strong>Internal Hostname:</strong> <span id="cert-hostname-text">-</span></p>
-                  <div class="buttons">
-                    <button class="button is-link" id="request-certificate-button">Request Certificate</button>
-                  </div>
-                  <p class="help">Automatically request a certificate from the domain CA for the internal hostname. Requires the certificate server to be set up first.</p>
-                </div>
-                
-                <hr class="mt-5 mb-5" />
-                
-                <h3 class="title is-5">Settings Management</h3>
-                <div class="field">
-                  <div class="buttons">
-                    <button class="button is-link is-outlined" id="export-settings-button">
-                      <span class="icon"><i class="fas fa-download"></i></span>
-                      <span>Export Settings</span>
-                    </button>
-                    <button class="button is-link is-outlined" id="import-settings-button">
-                      <span class="icon"><i class="fas fa-upload"></i></span>
-                      <span>Import Settings</span>
-                    </button>
-                  </div>
-                  <p class="help mt-2">Export/Import configuration settings (passwords are not included for security)</p>
-                </div>
-                <input type="file" id="import-settings-file" accept=".json" style="display: none;" />
-              </div>
-            </div>
-
-            <div id="view-resources" class="admin-view">
-              <div class="box">
-                <div class="level">
-                  <div class="level-left">
-                    <h2 class="title is-4">Protected Resources</h2>
-                  </div>
-                  <div class="level-right">
-                    <button class="button is-link" id="resource-add">Add Resource</button>
-                  </div>
-                </div>
-                <table class="table is-fullwidth" id="resource-table">
-                  <thead>
-                    <tr>
-                      <th>Name</th>
-                      <th>Target</th>
-                      <th>Group</th>
-                      <th></th>
-                    </tr>
-                  </thead>
-                  <tbody></tbody>
-                </table>
-              </div>
-            </div>
-
-            <div id="view-users" class="admin-view">
-              <div class="box">
-                <div class="level">
-                  <div class="level-left">
-                    <h2 class="title is-4">Directory Users</h2>
-                  </div>
-                  <div class="level-right">
-                    <div class="field is-grouped">
-                      <div class="control">
-                        <button class="button is-link" id="add-user-button">
-                          <span class="icon"><i class="fas fa-plus"></i></span>
-                          <span>Add User</span>
-                        </button>
-                      </div>
-                      <div class="field has-addons">
-                        <div class="control">
-                          <input class="input" id="user-query" placeholder="Search by name or SAM" />
-                        </div>
-                        <div class="control">
-                          <button class="button is-link" id="user-search">Search</button>
-                        </div>
-                      </div>
-                    </div>
-                  </div>
-                </div>
-                <table class="table is-fullwidth" id="user-table">
-                  <thead>
-                    <tr>
-                      <th>Name</th>
-                      <th>SAM</th>
-                      <th>Email</th>
-                      <th>Lock Status</th>
-                      <th>WebAuthn</th>
-                      <th>Enabled</th>
-                      <th>Actions</th>
-                    </tr>
-                  </thead>
-                  <tbody></tbody>
-                </table>
-              </div>
-            </div>
+    <div class="admin-shell">
+      <aside class="menu sidebar">
+        <div class="brand">
+          <div class="brand-badge">GP</div>
+          <div class="brand-copy">
+            <h1>Gate Proxy</h1>
+            <p>Administration Console</p>
           </div>
         </div>
-      </div>
-    </section>
+        <nav class="nav-group">
+          <p class="menu-label">Overview</p>
+          <ul class="menu-list nav-list">
+            <li><a class="nav-link is-active" data-view="dashboard" href="#" role="button">Dashboard</a></li>
+            <li><a class="nav-link" data-view="settings" href="#" role="button">Settings</a></li>
+          </ul>
+          <p class="menu-label">Access</p>
+          <ul class="menu-list nav-list">
+            <li><a class="nav-link" data-view="resources" href="#" role="button">Resources</a></li>
+            <li><a class="nav-link" data-view="users" href="#" role="button">Users</a></li>
+          </ul>
+        </nav>
+        <div class="sidebar-foot">
+          <p class="sidebar-foot-note">Secure • Observable • Auditable</p>
+        </div>
+      </aside>
+
+      <main class="workspace">
+        <header class="workspace-header">
+          <div>
+            <h2>Control Center</h2>
+            <p>Monitor and orchestrate every facet of your GateProxy deployment.</p>
+          </div>
+          <div id="alert" class="notification is-hidden" role="alert"></div>
+        </header>
+
+        <div class="workspace-body">
+          <section id="view-dashboard" class="admin-view is-active">
+            <article class="panel">
+              <header class="panel-header">
+                <div>
+                  <h3>Appliance Status</h3>
+                  <p>Real-time insights on connectivity, certificates, and resources.</p>
+                </div>
+              </header>
+              <div id="status-cards" class="status-grid"></div>
+            </article>
+
+            <article class="panel">
+              <header class="panel-header">
+                <div>
+                  <h3>Setup Automation</h3>
+                  <p>Guided scripts to extend your domain and certificate infrastructure.</p>
+                </div>
+              </header>
+
+              <div class="script-grid">
+                <article class="script-card">
+                  <header>
+                    <h4>Domain Controller Schema Update</h4>
+                    <p>Extend Active Directory with GateProxy attributes using Schema Admin rights.</p>
+                  </header>
+                  <div class="script-actions">
+                    <a href="/share/configure-domain-controller.zip" class="button is-link" download>
+                      <span aria-hidden="true">⬇</span>
+                      <span>configure-domain-controller.zip</span>
+                    </a>
+                    <p class="help">Includes auto-elevating <code>.bat</code> and PowerShell scripts.</p>
+                  </div>
+                  <ol class="script-steps">
+                    <li>Download and extract on the Schema Master DC.</li>
+                    <li>Run <code>configure-domain-controller.bat</code> (auto-elevates) or the PowerShell script.</li>
+                    <li>Use an account in <em>Schema Admins</em>; the script runs with current credentials.</li>
+                    <li>Allow the schema update to complete without additional prompts.</li>
+                  </ol>
+                </article>
+
+                <article class="script-card">
+                  <header>
+                    <h4>Certificate Authority Configuration</h4>
+                    <p>Prepare AD CS for automatic certificate issuance and enrollment.</p>
+                  </header>
+                  <div class="script-actions">
+                    <a href="/share/configure-certificate-server.zip" class="button is-link" download>
+                      <span aria-hidden="true">⬇</span>
+                      <span>configure-certificate-server.zip</span>
+                    </a>
+                    <p class="help">Includes auto-elevating <code>.bat</code> and PowerShell scripts.</p>
+                  </div>
+                  <ol class="script-steps">
+                    <li>Download and extract on the enterprise CA host.</li>
+                    <li>Execute <code>configure-certificate-server.bat</code> (auto-elevates) or run the PowerShell script.</li>
+                    <li>Follow prompts to install AD CS roles/features and publish templates.</li>
+                    <li>GateProxy will discover the CA and request certificates automatically.</li>
+                  </ol>
+                </article>
+              </div>
+
+              <div class="callout warning">
+                <h4>Operational notes</h4>
+                <ul>
+                  <li>Run scripts with appropriate elevated privileges on target servers.</li>
+                  <li>Ensure Active Directory and required Windows roles are already installed.</li>
+                  <li><code>.bat</code> files auto-elevate; PowerShell scripts remain available for manual execution.</li>
+                </ul>
+              </div>
+            </article>
+          </section>
+
+          <section id="view-settings" class="admin-view">
+            <article class="panel">
+              <header class="panel-header">
+                <div>
+                  <h3>Configuration</h3>
+                  <p>Define exposure, authentication posture, and administrative boundaries.</p>
+                </div>
+              </header>
+
+              <form id="settings-form" class="settings-form">
+                <div class="settings-group">
+                  <h4>Site</h4>
+                  <div class="field-grid">
+                    <label>
+                      <span>Public Base URL</span>
+                      <input name="publicBaseUrl" placeholder="https://gateway.example.com" />
+                    </label>
+                    <label>
+                      <span>Session Hours</span>
+                      <input name="sessionHours" type="number" min="1" max="72" />
+                    </label>
+                    <label class="toggle">
+                      <input type="checkbox" name="enableOtp" />
+                      <span>Enable OTP</span>
+                    </label>
+                    <label class="toggle">
+                      <input type="checkbox" name="enableWebAuthn" />
+                      <span>Require WebAuthn</span>
+                    </label>
+                  </div>
+                </div>
+
+                <div class="settings-group">
+                  <h4>Admin Portal Exposure</h4>
+                  <div class="callout neutral">
+                    <label class="toggle">
+                      <input type="checkbox" name="exposeToInternet" id="exposeToInternet" />
+                      <span>Expose the admin portal via Cloudflare tunnel</span>
+                    </label>
+                    <p>If disabled, access is limited to localhost, internal IP, or the server hostname.</p>
+                  </div>
+                </div>
+
+                <div class="settings-group">
+                  <h4>Admin Group DNs</h4>
+                  <div class="group-selector">
+                    <div class="selector-controls">
+                      <select id="admin-group-select">
+                        <option value="">Search for a group...</option>
+                      </select>
+                      <button class="button is-link" type="button" id="admin-group-add">Add</button>
+                    </div>
+                    <input type="text" id="admin-group-search" placeholder="Type to search groups..." />
+                    <div id="admin-groups-list" class="chip-collection"></div>
+                    <input type="hidden" name="adminGroupDns" id="adminGroupDns" />
+                  </div>
+                </div>
+
+                <footer class="form-actions">
+                  <button class="button is-link" type="submit">Save settings</button>
+                </footer>
+              </form>
+
+              <div class="divider"></div>
+
+              <section class="integrations">
+                <div class="integration-card">
+                  <header>
+                    <h4>Cloudflare Tunnel</h4>
+                    <p>Keep your deployment paired with the correct tunnel endpoint.</p>
+                  </header>
+                  <p class="integration-status">Status: <span id="tunnel-status">Checking...</span></p>
+                  <button class="button is-link" id="connect-tunnel-button">Connect to existing tunnel</button>
+                </div>
+
+                <div class="integration-card">
+                  <header>
+                    <h4>Certificate Lifecycle</h4>
+                    <p>Automate enrollment from your enterprise CA.</p>
+                  </header>
+                  <ul class="cert-status">
+                    <li><strong>Certificate Status:</strong> <span id="cert-status-text">Checking...</span></li>
+                    <li><strong>CA Server:</strong> <span id="cert-ca-text">-</span></li>
+                    <li><strong>Internal Hostname:</strong> <span id="cert-hostname-text">-</span></li>
+                  </ul>
+                  <button class="button is-link" id="request-certificate-button">Request certificate</button>
+                  <p class="help">Requires the certificate server to be configured and reachable.</p>
+                </div>
+
+                <div class="integration-card">
+                  <header>
+                    <h4>Settings Portability</h4>
+                    <p>Move configuration between environments with a single click.</p>
+                  </header>
+                  <div class="button-row">
+                    <button class="button is-outline" id="export-settings-button">⬇ Export JSON</button>
+                    <button class="button is-outline" id="import-settings-button">⬆ Import JSON</button>
+                  </div>
+                  <p class="help">Passwords and secrets stay encrypted and are not exported.</p>
+                  <input type="file" id="import-settings-file" accept=".json" hidden />
+                </div>
+              </section>
+            </article>
+          </section>
+
+          <section id="view-resources" class="admin-view">
+            <article class="panel">
+              <header class="panel-header">
+                <div>
+                  <h3>Protected Resources</h3>
+                  <p>Curate application access for your workforce.</p>
+                </div>
+                <button class="button is-link" id="resource-add">Add resource</button>
+              </header>
+              <div id="resource-table" class="data-table"></div>
+            </article>
+          </section>
+
+          <section id="view-users" class="admin-view">
+            <article class="panel">
+              <header class="panel-header">
+                <div>
+                  <h3>Directory Users</h3>
+                  <p>Insight and control for every managed identity.</p>
+                </div>
+                <div class="user-toolbar">
+                  <button class="button is-link" id="add-user-button">＋ Add user</button>
+                  <div class="search-input">
+                    <input id="user-query" placeholder="Search by name or SAM" />
+                    <button class="button is-outline" id="user-search">Search</button>
+                  </div>
+                </div>
+              </header>
+              <div id="user-table" class="data-table"></div>
+            </article>
+          </section>
+        </div>
+      </main>
+    </div>
 
     <div class="modal" id="user-modal">
       <div class="modal-background"></div>
@@ -320,21 +272,21 @@
           <button class="delete" aria-label="close"></button>
         </header>
         <section class="modal-card-body">
-          <form id="user-form">
-            <div class="field">
-              <label class="label">Email</label>
-              <input class="input" name="mail" />
-            </div>
-            <div class="field">
-              <label class="label">Phone</label>
-              <input class="input" name="telephoneNumber" />
-            </div>
+          <form id="user-form" class="modal-form">
+            <label>
+              <span>Email</span>
+              <input name="mail" type="email" placeholder="user@example.com" />
+            </label>
+            <label>
+              <span>Phone</span>
+              <input name="telephoneNumber" placeholder="Optional" />
+            </label>
           </form>
         </section>
         <footer class="modal-card-foot">
           <button class="button is-link" id="user-save">Save</button>
-          <button class="button is-warning" id="user-reset-webauthn">Clear WebAuthn</button>
-          <button class="button is-warning" id="user-unlock">Unlock</button>
+          <button class="button is-outline" id="user-reset-webauthn">Clear WebAuthn</button>
+          <button class="button is-outline" id="user-unlock">Unlock</button>
           <button class="button is-danger" id="user-disable">Disable</button>
         </footer>
       </div>
@@ -348,51 +300,45 @@
           <button class="delete" aria-label="close"></button>
         </header>
         <section class="modal-card-body">
-          <form id="add-user-form">
-            <div class="field">
-              <label class="label">SAM Account Name <span class="has-text-danger">*</span></label>
-              <input class="input" name="sAMAccountName" required placeholder="username" />
-              <p class="help">The login username (required)</p>
-            </div>
-            <div class="field">
-              <label class="label">Display Name <span class="has-text-danger">*</span></label>
-              <input class="input" name="displayName" required placeholder="Full Name" />
-              <p class="help">The user's full display name (required)</p>
-            </div>
-            <div class="columns">
-              <div class="column">
-                <div class="field">
-                  <label class="label">First Name</label>
-                  <input class="input" name="givenName" placeholder="First" />
-                </div>
-              </div>
-              <div class="column">
-                <div class="field">
-                  <label class="label">Last Name</label>
-                  <input class="input" name="sn" placeholder="Last" />
-                </div>
-              </div>
-            </div>
-            <div class="field">
-              <label class="label">Email</label>
-              <input class="input" type="email" name="mail" placeholder="user@example.com" />
-            </div>
-            <div class="field">
-              <label class="label">Password <span class="has-text-danger">*</span></label>
-              <input class="input" type="password" name="password" required placeholder="Enter password" />
-              <p class="help">Initial password for the user (required)</p>
-            </div>
-            <div class="field">
-              <label class="checkbox">
-                <input type="checkbox" name="enabled" checked />
-                Account enabled (user can log in immediately)
+          <form id="add-user-form" class="modal-form">
+            <label>
+              <span>SAM Account Name <strong>*</strong></span>
+              <input name="sAMAccountName" required placeholder="username" />
+              <small>The login username (required)</small>
+            </label>
+            <label>
+              <span>Display Name <strong>*</strong></span>
+              <input name="displayName" required placeholder="Full name" />
+              <small>The user's full display name (required)</small>
+            </label>
+            <div class="dual-input">
+              <label>
+                <span>First Name</span>
+                <input name="givenName" placeholder="First" />
+              </label>
+              <label>
+                <span>Last Name</span>
+                <input name="sn" placeholder="Last" />
               </label>
             </div>
+            <label>
+              <span>Email</span>
+              <input type="email" name="mail" placeholder="user@example.com" />
+            </label>
+            <label>
+              <span>Password <strong>*</strong></span>
+              <input type="password" name="password" required placeholder="Enter password" />
+              <small>Initial password for the user (required)</small>
+            </label>
+            <label class="toggle">
+              <input type="checkbox" name="enabled" checked />
+              <span>Account enabled (user can log in immediately)</span>
+            </label>
           </form>
         </section>
         <footer class="modal-card-foot">
-          <button class="button is-link" id="add-user-save">Create User</button>
-          <button class="button" id="add-user-cancel">Cancel</button>
+          <button class="button is-link" id="add-user-save">Create user</button>
+          <button class="button is-outline" id="add-user-cancel">Cancel</button>
         </footer>
       </div>
     </div>
@@ -405,51 +351,43 @@
           <button class="delete" aria-label="close"></button>
         </header>
         <section class="modal-card-body">
-          <form id="resource-form">
-            <div class="field">
-              <label class="label">Resource Name</label>
-              <input class="input" name="name" type="text" placeholder="e.g. Sora Toolbox" required />
-            </div>
-            <div class="field">
-              <label class="label">Target URL</label>
-              <input class="input" name="target_url" type="url" placeholder="http://10.0.0.5:9443" required />
-              <p class="help">The internal URL of the resource to proxy</p>
-            </div>
-            <div class="field">
-              <label class="label">Description</label>
-              <textarea class="textarea" name="description" placeholder="Optional description"></textarea>
-            </div>
-            <div class="field">
-              <label class="label">Icon URL</label>
-              <input class="input" name="icon" type="url" placeholder="https://example.com/icon.png" />
-              <p class="help">Optional icon URL for the landing page</p>
-            </div>
-            <div class="field">
-              <label class="label">Allowed Groups</label>
-              <div class="field has-addons">
-                <div class="control is-expanded">
-                  <div class="select is-fullwidth">
-                    <select id="resource-group-select" style="width: 100%;">
-                      <option value="">Search for a group...</option>
-                    </select>
-                  </div>
-                </div>
-                <div class="control">
-                  <button class="button is-link" type="button" id="resource-group-add">Add</button>
-                </div>
+          <form id="resource-form" class="modal-form">
+            <label>
+              <span>Resource Name</span>
+              <input name="name" type="text" placeholder="e.g. Sora Toolbox" required />
+            </label>
+            <label>
+              <span>Target URL</span>
+              <input name="target_url" type="url" placeholder="http://10.0.0.5:9443" required />
+              <small>The internal URL of the resource to proxy.</small>
+            </label>
+            <label>
+              <span>Description</span>
+              <textarea name="description" placeholder="Optional description"></textarea>
+            </label>
+            <label>
+              <span>Icon URL</span>
+              <input name="icon" type="url" placeholder="https://example.com/icon.png" />
+              <small>Optional icon URL for the landing page.</small>
+            </label>
+            <div class="group-selector">
+              <span>Allowed Groups</span>
+              <div class="selector-controls">
+                <select id="resource-group-select">
+                  <option value="">Search for a group...</option>
+                </select>
+                <button class="button is-link" type="button" id="resource-group-add">Add</button>
               </div>
-              <input type="text" class="input mt-2" id="resource-group-search" placeholder="Type to search groups..." />
-              <p class="help mt-2">Optional: Only users in the selected groups can access this resource</p>
-              <div id="resource-groups-list" class="mt-3">
-                <!-- Selected groups will appear here -->
-              </div>
+              <input type="text" id="resource-group-search" placeholder="Type to search groups..." />
+              <p class="help">Leave empty to allow any authenticated user.</p>
+              <div id="resource-groups-list" class="chip-collection"></div>
               <input type="hidden" name="allowed_groups" id="resource-allowed-groups" />
             </div>
           </form>
         </section>
         <footer class="modal-card-foot">
-          <button class="button is-link" id="resource-save">Add Resource</button>
-          <button class="button" id="resource-cancel">Cancel</button>
+          <button class="button is-link" id="resource-save">Add resource</button>
+          <button class="button is-outline" id="resource-cancel">Cancel</button>
         </footer>
       </div>
     </div>

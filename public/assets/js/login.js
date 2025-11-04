@@ -7,14 +7,25 @@ const alertBox = document.getElementById('login-alert');
 
 let pendingId = null;
 
-function showAlert(message, type = 'is-danger') {
+function normalizeTone(tone) {
+  if (!tone) return 'danger';
+  if (tone.startsWith('is-')) {
+    return tone.substring(3);
+  }
+  return tone;
+}
+
+function showAlert(message, tone = 'danger') {
+  const normalized = normalizeTone(tone);
   alertBox.textContent = message;
-  alertBox.className = `notification ${type}`;
+  alertBox.dataset.tone = normalized;
+  alertBox.classList.remove('is-hidden');
 }
 
 function clearAlert() {
   alertBox.textContent = '';
-  alertBox.className = 'notification is-hidden';
+  alertBox.classList.add('is-hidden');
+  delete alertBox.dataset.tone;
 }
 
 async function post(endpoint, body) {

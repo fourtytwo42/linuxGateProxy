@@ -4,59 +4,57 @@
     <meta charset="UTF-8" />
     <meta http-equiv="X-UA-Compatible" content="IE=edge" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Linux Gate Proxy Login</title>
-    <link rel="stylesheet" href="/gp-assets/css/bulma.min.css" />
+    <title>Gate Proxy Access</title>
+    <link rel="stylesheet" href="https://unpkg.com/open-props@1.6.14" />
+    <link rel="stylesheet" href="https://unpkg.com/open-props/normalize.min.css" />
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@picocss/pico@2/css/pico.min.css" integrity="sha384-z/8ueatf01V4zGEnfe7jyL+9/TQc0tisuxGDdKek7m6eGbQIbEvhCJgYblrBa8Jv" crossorigin="anonymous" />
     <link rel="stylesheet" href="/gp-assets/css/app.css" />
   </head>
-  <body class="has-background-light">
-    <section class="section is-fullheight-with-navbar">
-      <div class="container">
-        <div class="columns is-centered">
-          <div class="column is-5">
-            <div class="box">
-              <h1 class="title has-text-centered">Linux Gate Proxy</h1>
-              <div id="login-alert" class="notification is-hidden"></div>
-              <form id="login-form">
-                <div class="field">
-                  <label class="label">Username</label>
-                  <div class="control has-icons-left">
-                    <input class="input" name="username" required autocomplete="username" />
-                    <span class="icon is-small is-left"><i class="fas fa-user"></i></span>
-                  </div>
-                </div>
-                <div class="field">
-                  <label class="label">Password</label>
-                  <div class="control has-icons-left">
-                    <input class="input" name="password" type="password" required autocomplete="current-password" />
-                    <span class="icon is-small is-left"><i class="fas fa-lock"></i></span>
-                  </div>
-                </div>
-                <div class="field">
-                  <button class="button is-link is-fullwidth" type="submit">Sign in</button>
-                </div>
-              </form>
-
-              <div id="otp-form" class="is-hidden">
-                <p class="mb-3">Enter the verification code sent to your directory email.</p>
-                <div class="field">
-                  <label class="label">Verification Code</label>
-                  <input class="input" id="otp-code" />
-                </div>
-                <div class="field">
-                  <button class="button is-link is-fullwidth" id="otp-submit">Verify</button>
-                </div>
-              </div>
-
-              <div id="webauthn-progress" class="is-hidden">
-                <p class="has-text-centered">Follow the prompt in your browser or authenticator.</p>
-              </div>
-            </div>
+  <body class="login-body">
+    <main class="login-shell">
+      <section class="login-card">
+        <header class="login-card__header">
+          <div class="login-logo" aria-hidden="true">GP</div>
+          <div>
+            <h1>Linux Gate Proxy</h1>
+            <p>Authenticate to access protected resources</p>
           </div>
-        </div>
-      </div>
-    </section>
+        </header>
 
-    <script src="https://kit.fontawesome.com/a2e0e9b1ef.js" crossorigin="anonymous"></script>
+        <div id="login-alert" class="notification is-hidden"></div>
+
+        <form id="login-form" class="stack">
+          <label>
+            <span>Username</span>
+            <input name="username" required autocomplete="username" placeholder="you@example.com" />
+          </label>
+          <label>
+            <span>Password</span>
+            <input name="password" type="password" required autocomplete="current-password" placeholder="••••••••" />
+          </label>
+          <button type="submit" class="button is-link">Sign in</button>
+        </form>
+
+        <div id="otp-form" class="stack is-hidden">
+          <p>Enter the one-time code sent to your directory email.</p>
+          <label>
+            <span>Verification Code</span>
+            <input id="otp-code" inputmode="numeric" maxlength="6" placeholder="123456" />
+          </label>
+          <button class="button is-link" id="otp-submit">Verify</button>
+        </div>
+
+        <div id="webauthn-progress" class="stack is-hidden">
+          <p class="spinner-text">Check your authenticator for a prompt…</p>
+          <div class="spinner" aria-hidden="true"></div>
+        </div>
+
+        <footer class="login-meta">
+          <small>Need access? Contact your domain administrator.</small>
+        </footer>
+      </section>
+    </main>
+
     <script type="module" src="/gp-assets/js/login.js"></script>
   </body>
 </html>
