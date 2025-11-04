@@ -117,6 +117,28 @@ router.post('/gateProxyAdmin/api/settings/adminPortal', requireAdmin, (req, res)
   res.json({ success: true });
 });
 
+// Certificate management endpoints
+router.post('/gateProxyAdmin/api/certificate/request', requireAdmin, async (req, res) => {
+  try {
+    const { dnsNames } = req.body;
+    const result = await requestCertificate(dnsNames || []);
+    res.json({ success: true, ...result });
+  } catch (error) {
+    logger.error('Error requesting certificate', { error: error.message });
+    res.status(500).json({ error: error.message });
+  }
+});
+
+router.get('/gateProxyAdmin/api/certificate/status', requireAdmin, async (req, res) => {
+  try {
+    const status = await getCertificateStatus();
+    res.json(status);
+  } catch (error) {
+    logger.error('Error getting certificate status', { error: error.message });
+    res.status(500).json({ error: error.message });
+  }
+});
+
 router.post('/gateProxyAdmin/api/settings/smtp', requireAdmin, (req, res) => {
   const config = loadConfig();
   const { password, ...rest } = req.body;

@@ -899,6 +899,85 @@ importSettingsFile.addEventListener('change', async (event) => {
   }
 });
 
+// Certificate management
+const requestCertificateButton = document.getElementById('request-certificate-button');
+const certStatusText = document.getElementById('cert-status-text');
+const certCaText = document.getElementById('cert-ca-text');
+const certHostnameText = document.getElementById('cert-hostname-text');
+
+function updateCertificateStatus() {
+  fetch('/gateProxyAdmin/api/certificate/status')
+    .then(res => res.json())
+    .then(status => {
+      if (certStatusText) {
+        certStatusText.textContent = status.hasCertificate 
+          ? `Valid (${status.internalHostname || 'installed'})` 
+          : 'Not installed';
+      }
+      if (certCaText) {
+        certCaText.textContent = status.caFound 
+          ? (status.caServer || 'Found') 
+          : 'Not found';
+      }
+      if (certHostnameText) {
+        certHostnameText.textContent = status.internalHostname || '-';
+      }
+      
+      if (requestCertificateButton) {
+        requestCertificateButton.disabled = !status.caFound || status.hasCertificate;
+        requestCertificateButton.textContent = status.hasCertificate 
+          ? 'Certificate Installed' 
+          : 'Request Certificate';
+      }
+    })
+    .catch(err => {
+      console.error('Failed to get certificate status', err);
+      if (certStatusText) certStatusText.textContent = 'Error';
+    });
+}
+
+if (requestCertificateButton) {
+  requestCertificateButton.addEventListener('click', () => {
+    if (!confirm('Request a new certificate from the domain CA? This will generate a new certificate request.')) {
+      return;
+    }
+    
+    requestCertificateButton.disabled = true;
+    requestCertificateButton.textContent = 'Requesting...';
+    
+    fetch('/gateProxyAdmin/api/certificate/request', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({})
+    })
+      .then(res => res.json())
+      .then(data => {
+        if (data.success) {
+          alert('Certificate requested successfully! The server will use HTTPS once the certificate is installed.');
+          updateCertificateStatus();
+          // Reload page after a delay to show updated status
+          setTimeout(() => location.reload(), 2000);
+        } else {
+          alert('Certificate request failed: ' + (data.error || 'Unknown error'));
+          requestCertificateButton.disabled = false;
+          requestCertificateButton.textContent = 'Request Certificate';
+        }
+      })
+      .catch(err => {
+        alert('Certificate request failed: ' + err.message);
+        requestCertificateButton.disabled = false;
+        requestCertificateButton.textContent = 'Request Certificate';
+      });
+  });
+}
+
+// Update certificate status on load and periodically
+if (certStatusText) {
+  updateCertificateStatus();
+  // Refresh certificate status every 30 seconds
+  setInterval(updateCertificateStatus, 30000);
+}
+
 // Cloudflare tunnel management
 const connectTunnelButton = document.getElementById('connect-tunnel-button');
 const tunnelStatusSpan = document.getElementById('tunnel-status');

@@ -220,6 +220,19 @@
                 
                 <hr class="mt-5 mb-5" />
                 
+                <h3 class="title is-5">Certificate Management</h3>
+                <div class="field">
+                  <p class="mb-3"><strong>Certificate Status:</strong> <span id="cert-status-text">Checking...</span></p>
+                  <p class="mb-3"><strong>CA Server:</strong> <span id="cert-ca-text">-</span></p>
+                  <p class="mb-3"><strong>Internal Hostname:</strong> <span id="cert-hostname-text">-</span></p>
+                  <div class="buttons">
+                    <button class="button is-link" id="request-certificate-button">Request Certificate</button>
+                  </div>
+                  <p class="help">Automatically request a certificate from the domain CA for the internal hostname. Requires the certificate server to be set up first.</p>
+                </div>
+                
+                <hr class="mt-5 mb-5" />
+                
                 <h3 class="title is-5">Settings Management</h3>
                 <div class="field">
                   <div class="buttons">
