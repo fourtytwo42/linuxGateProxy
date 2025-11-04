@@ -498,14 +498,108 @@ export async function searchUsers({ query, size = 25, page = 1, userCredentials 
   return withServiceClient(executor);
 }
 
+// Groups that are meant for servers/computers, not users
+const SERVER_GROUP_PATTERNS = [
+  /^domain controllers$/i,
+  /^domain computers$/i,
+  /^read-only domain controllers$/i,
+  /^enterprise read-only domain controllers$/i,
+  /^domain controller servers$/i,
+  /^domain admins$/i, // Keep this one - it's for users
+  /^windows authorization access group$/i,
+  /^ras and ias servers$/i,
+  /^cert publishers$/i, // Usually for servers
+  /^dnsadmins$/i,
+  /^dnsupdateproxy$/i,
+  /^group policy creator owners$/i,
+  /^allowed rodc password replication group$/i,
+  /^denied rodc password replication group$/i,
+  /^rodc$/i,
+  /.*computer.*/i, // Groups with "computer" in the name
+  /.*server.*/i, // Groups with "server" in the name (but we need to be careful - might have user groups with "server" in them)
+  /.*service account.*/i,
+  /.*service-account.*/i,
+  /.*svc.*/i, // Service account groups
+];
+
+// More specific server-related group names to exclude
+const SERVER_GROUP_NAMES = [
+  'Domain Controllers',
+  'Domain Computers',
+  'Domain Controllers Read-Only',
+  'Enterprise Read-Only Domain Controllers',
+  'Windows Authorization Access Group',
+  'RAS and IAS Servers',
+  'Cert Publishers',
+  'DNSAdmins',
+  'DnsUpdateProxy',
+  'Group Policy Creator Owners',
+  'Allowed RODC Password Replication Group',
+  'Denied RODC Password Replication Group',
+  'RODC',
+];
+
+// Admin groups that should be kept (these are for users, not servers)
+const KEEP_ADMIN_GROUPS = [
+  'domain admins',
+  'enterprise admins',
+  'schema admins',
+  'administrators',
+];
+
+function isServerGroup(group) {
+  // Handle LDAP attributes which can be arrays or strings
+  const getAttribute = (attr) => {
+    const value = group[attr];
+    if (Array.isArray(value) && value.length > 0) {
+      return String(value[0]).trim();
+    }
+    return value ? String(value).trim() : '';
+  };
+  
+  const name = getAttribute('cn') || getAttribute('name') || getAttribute('sAMAccountName') || '';
+  const description = getAttribute('description') || '';
+  const nameLower = name.toLowerCase();
+  const descriptionLower = description.toLowerCase();
+  
+  // Always keep admin groups that are for users
+  if (KEEP_ADMIN_GROUPS.includes(nameLower)) {
+    return false;
+  }
+  
+  // Check exact name matches
+  if (SERVER_GROUP_NAMES.some(pattern => nameLower === pattern.toLowerCase())) {
+    return true;
+  }
+  
+  // Check against patterns (but exclude user-related groups)
+  for (const pattern of SERVER_GROUP_PATTERNS) {
+    if (pattern.test(nameLower) || pattern.test(descriptionLower)) {
+      // Skip if it's clearly a user group despite matching pattern
+      if (nameLower.includes('user') || nameLower.includes('users')) {
+        continue;
+      }
+      // Skip if it's an admin group for users
+      if (nameLower.includes('admin') && (nameLower.includes('domain admin') || nameLower.includes('enterprise admin') || nameLower.includes('schema admin'))) {
+        continue;
+      }
+      return true;
+    }
+  }
+  
+  return false;
+}
+
 export async function searchGroups({ query, size = 50, page = 1, userCredentials = null } = {}) {
   const executor = async (client, config) => {
-    const filterValue = escapeFilterValue(query || '*');
     // Search for groups - most common objectClass is 'group'
     const baseFilter = '(objectClass=group)';
-    const filter = query
-      ? `(&${baseFilter}(|(cn=${filterValue}*)(name=${filterValue}*)(sAMAccountName=${filterValue}*)(distinguishedName=${filterValue}*)))`
-      : baseFilter;
+    
+    // If query is empty, '*', or just whitespace, return all groups
+    const normalizedQuery = (query || '').trim();
+    const filter = (normalizedQuery === '' || normalizedQuery === '*')
+      ? baseFilter
+      : `(&${baseFilter}(|(cn=${escapeFilterValue(normalizedQuery)}*)(name=${escapeFilterValue(normalizedQuery)}*)(sAMAccountName=${escapeFilterValue(normalizedQuery)}*)(distinguishedName=${escapeFilterValue(normalizedQuery)}*)))`;
 
     const result = await client.search(config.auth.baseDn, {
       scope: 'sub',
@@ -517,7 +611,11 @@ export async function searchGroups({ query, size = 50, page = 1, userCredentials
       },
       attributes: ['distinguishedName', 'cn', 'name', 'sAMAccountName', 'description']
     });
-    return result.searchEntries;
+    
+    // Filter out server-related groups
+    const filtered = (result.searchEntries || []).filter(group => !isServerGroup(group));
+    
+    return filtered;
   };
   
   if (userCredentials && userCredentials.userDn && userCredentials.password) {

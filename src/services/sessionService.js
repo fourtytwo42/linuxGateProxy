@@ -71,14 +71,26 @@ export async function ensureSession(userEntry, password = null) {
   const dnEncoded = Buffer.from(dn, 'utf8').toString('base64');
   const payload = `${userEntry.sAMAccountName}|${dnEncoded}|${session.expires}`;
   const signature = createSignature(secret, payload);
-  return `${payload}|${signature}`;
+  const token = `${payload}|${signature}`;
+  return Buffer.from(token, 'utf8').toString('base64url');
 }
 
 export async function validateSession(token) {
   if (!token) {
     return { valid: false };
   }
-  const parts = token.split('|');
+
+  let rawToken = token;
+  if (!token.includes('|')) {
+    try {
+      rawToken = Buffer.from(token, 'base64url').toString('utf8');
+    } catch (error) {
+      logger.warn('Failed to decode session token', { error: error.message });
+      return { valid: false };
+    }
+  }
+
+  const parts = rawToken.split('|');
   if (parts.length !== 4) {
     return { valid: false };
   }

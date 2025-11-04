@@ -10,12 +10,12 @@ import { execFileSync } from 'child_process';
 import { ensureDirSync } from './utils/fs.js';
 import { dataDir, runtimeDir, tempDir, shareDir, publicDir, projectRoot } from './utils/paths.js';
 import fs from 'fs';
-import { loadConfig } from './config/index.js';
+import { loadConfig, listResources } from './config/index.js';
 import { authenticate, requireAuth } from './middleware/auth.js';
 import { setupRouter } from './routes/setup.js';
 import { authRouter } from './routes/auth.js';
 import { adminRouter } from './routes/admin.js';
-import { resourceRouter } from './routes/resources.js';
+import { resourceRouter, proxyResourceById, ACTIVE_RESOURCE_COOKIE_NAME } from './routes/resources.js';
 import { handleProxy, upgradeProxy } from './services/proxyService.js';
 import * as certService from './services/certService.js';
 import { purgeExpiredOtps } from './services/otpService.js';
@@ -37,6 +37,75 @@ const scriptBundles = [
     files: ['update-schema-gateproxy.ps1', 'update-schema-gateproxy.bat', 'update-schema-gateproxy.txt']
   }
 ];
+
+const INTERNAL_PROXY_SKIP_PREFIXES = [
+  '/setup',
+  '/api/setup',
+  '/api/auth',
+  '/auth',
+  '/gateProxyAdmin',
+  '/gateProxyAdmin/api',
+  '/gp-assets',
+  '/share',
+  '/healthz',
+  '/gateProxyAdmin/export',
+  '/gateProxyAdmin/import'
+];
+
+const INTERNAL_PROXY_SKIP_EXACT = ['/login', '/logout', '/favicon.ico'];
+const REFERER_REQUIRED_PREFIXES = ['/gp-assets', '/static'];
+
+function extractResourceIdFromUrl(url = '') {
+  const match = url.match(/\/resource\/([0-9a-fA-F-]+)/);
+  return match ? match[1] : null;
+}
+
+function shouldBypassResourceProxy(pathname, refererResourceId) {
+  if (!pathname) {
+    return true;
+  }
+
+  if (pathname.startsWith('/resource/')) {
+    return true;
+  }
+
+  if (INTERNAL_PROXY_SKIP_EXACT.includes(pathname)) {
+    return true;
+  }
+
+  for (const prefix of INTERNAL_PROXY_SKIP_PREFIXES) {
+    if (pathname === prefix || pathname.startsWith(prefix + '/')) {
+      return true;
+    }
+  }
+
+  if (!refererResourceId) {
+    for (const prefix of REFERER_REQUIRED_PREFIXES) {
+      if (pathname.startsWith(prefix)) {
+        return true;
+      }
+    }
+  }
+
+  return false;
+}
+
+function determineActiveResourceId(req, resources, refererResourceId) {
+  if (refererResourceId) {
+    return refererResourceId;
+  }
+
+  const cookieId = req.cookies?.[ACTIVE_RESOURCE_COOKIE_NAME];
+  if (cookieId) {
+    return cookieId;
+  }
+
+  if (resources.length === 1) {
+    return resources[0].id;
+  }
+
+  return null;
+}
 
 function bootstrapDirectories() {
   [dataDir, runtimeDir, tempDir, shareDir].forEach((dir) => ensureDirSync(dir));
@@ -143,8 +212,8 @@ async function startServer() {
     return next();
   });
 
-  app.use(express.static(publicDir, { index: false }));
-  app.use('/assets', express.static(path.join(publicDir, 'assets')));
+  // Serve GateProxy's own assets with a specific prefix to avoid conflicts
+  app.use('/gp-assets', express.static(path.join(publicDir, 'assets')));
 
   // Serve setup scripts directly from scripts directory (no copying needed)
   app.use('/share', express.static(scriptsDir, {
@@ -170,7 +239,7 @@ async function startServer() {
     if (!config.setup.completed) {
       const allowed = req.path.startsWith('/setup')
         || req.path.startsWith('/api/setup')
-        || req.path.startsWith('/assets')
+        || req.path.startsWith('/gp-assets')
         || req.path === '/healthz';
       if (!allowed) {
         return res.redirect('/setup');
@@ -198,7 +267,51 @@ async function startServer() {
   app.use(adminRouter);
   app.use(resourceRouter);
 
-  app.use(requireAuth, handleProxy);
+  app.use(requireAuth, (req, res, next) => {
+    const resources = listResources();
+    if (!resources || resources.length === 0) {
+      return next();
+    }
+
+    const pathname = req.path || req.originalUrl || '/';
+    const refererResourceId = extractResourceIdFromUrl(req.get('referer'));
+    if (shouldBypassResourceProxy(pathname, refererResourceId)) {
+      return next();
+    }
+
+    const activeResourceId = determineActiveResourceId(req, resources, refererResourceId);
+    if (!activeResourceId) {
+      return next();
+    }
+
+    const resourceExists = resources.some((r) => r.id === activeResourceId);
+    if (!resourceExists) {
+      return next();
+    }
+
+    logger.debug('Routing request to active resource', {
+      path: pathname,
+      resourceId: activeResourceId,
+      refererResourceId
+    });
+
+    return proxyResourceById(req, res, next, activeResourceId, { stripPrefix: false });
+  });
+
+  // Only proxy through resources - no fallback to targetHost
+  // If no resources are configured, return 404
+  app.use(requireAuth, (req, res, next) => {
+    const resources = listResources();
+    
+    // Only proxy if resources are configured and accessible
+    // All proxying must go through the resource router
+    if (!resources || resources.length === 0) {
+      return res.status(404).send('No resources configured. Please add resources via the admin panel.');
+    }
+    
+    // If we reach here, the request didn't match any resource route
+    return res.status(404).send('Resource not found');
+  });
 
   app.use((err, req, res, next) => {
     logger.error('Unhandled request error', { error: err.message });

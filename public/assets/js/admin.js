@@ -260,12 +260,20 @@ function addResourceGroupToList(dn, name) {
   }
 }
 
+// Resource group dropdown - populate on focus (like admin groups)
+resourceGroupSelect.addEventListener('focus', async () => {
+  if (resourceGroupSelect.options.length <= 1) {
+    // Only reload if dropdown is empty or has just the placeholder
+    await searchGroups('*', resourceGroupSelect, 200);
+  }
+});
+
 // Resource group search
 resourceGroupSearch.addEventListener('input', (e) => {
   clearTimeout(resourceGroupSearchTimeout);
   const query = e.target.value.trim();
   resourceGroupSearchTimeout = setTimeout(() => {
-    searchGroups(query, resourceGroupSelect);
+    searchGroups(query || '*', resourceGroupSelect, 200);
   }, 300);
 });
 
@@ -277,11 +285,15 @@ resourceGroupAddBtn.addEventListener('click', () => {
 });
 
 // Open resource modal
-resourceAddButton.addEventListener('click', () => {
+resourceAddButton.addEventListener('click', async () => {
   resourceForm.reset();
   resourceGroups = [];
   renderResourceGroupList(resourceGroups, resourceGroupsList);
   updateResourceGroupHiddenInput();
+  // Pre-populate the group dropdown when opening the modal
+  if (resourceGroupSelect.options.length <= 1) {
+    await searchGroups('*', resourceGroupSelect, 200);
+  }
   resourceModal.classList.add('is-active');
 });
 
@@ -319,7 +331,7 @@ resourceSaveButton.addEventListener('click', async () => {
   
   try {
     await postJson('/gateProxyAdmin/api/resources', payload);
-    resources.push({ ...payload, allowed_groups });
+    resources.push(payload);
     renderResources();
     renderStatusCards();
     resourceModal.classList.remove('is-active');
@@ -521,39 +533,81 @@ async function loadUsers(query = '') {
       
       // Name column with edit icon
       const nameCell = document.createElement('td');
-      nameCell.innerHTML = `
-        <span class="is-inline-flex is-align-items-center">
-          <span>${displayName}</span>
-          <button class="button is-small is-text ml-2" title="Edit name" style="padding: 0; width: 1.5rem; height: 1.5rem;">
-            <span class="icon is-small">
-              <i class="fas fa-edit"></i>
-            </span>
-          </button>
-        </span>
-      `;
-      nameCell.querySelector('button').addEventListener('click', () => {
+      const nameContainer = document.createElement('span');
+      nameContainer.className = 'is-inline-flex is-align-items-center';
+      const nameText = document.createElement('span');
+      nameText.textContent = displayName;
+      const nameEditBtn = document.createElement('button');
+      nameEditBtn.className = 'button is-small is-text ml-2';
+      nameEditBtn.title = 'Edit name';
+      nameEditBtn.style.cssText = 'padding: 0.25rem; margin-left: 0.5rem; background: transparent; cursor: pointer; color: #3273dc;';
+      nameEditBtn.innerHTML = '✎';
+      nameEditBtn.addEventListener('click', () => {
         editUserField(sam, 'displayName', displayName, 'Display Name');
       });
+      nameEditBtn.addEventListener('mouseenter', (e) => {
+        e.target.style.background = '#3273dc';
+        e.target.style.color = '#fff';
+      });
+      nameEditBtn.addEventListener('mouseleave', (e) => {
+        e.target.style.background = 'transparent';
+        e.target.style.color = '#3273dc';
+      });
+      nameContainer.appendChild(nameText);
+      nameContainer.appendChild(nameEditBtn);
+      nameCell.appendChild(nameContainer);
       
       // SAM column with edit icon
       const samCell = document.createElement('td');
-      samCell.innerHTML = `
-        <span class="is-inline-flex is-align-items-center">
-          <span>${sam}</span>
-          <button class="button is-small is-text ml-2" title="Edit SAM" style="padding: 0; width: 1.5rem; height: 1.5rem;">
-            <span class="icon is-small">
-              <i class="fas fa-edit"></i>
-            </span>
-          </button>
-        </span>
-      `;
-      samCell.querySelector('button').addEventListener('click', () => {
+      const samContainer = document.createElement('span');
+      samContainer.className = 'is-inline-flex is-align-items-center';
+      const samText = document.createElement('span');
+      samText.textContent = sam;
+      const samEditBtn = document.createElement('button');
+      samEditBtn.className = 'button is-small is-text ml-2';
+      samEditBtn.title = 'Edit SAM Account Name';
+      samEditBtn.style.cssText = 'padding: 0.25rem; margin-left: 0.5rem; background: transparent; cursor: pointer; color: #3273dc;';
+      samEditBtn.innerHTML = '✎';
+      samEditBtn.addEventListener('click', () => {
         editUserField(sam, 'sAMAccountName', sam, 'SAM Account Name');
       });
+      samEditBtn.addEventListener('mouseenter', (e) => {
+        e.target.style.background = '#3273dc';
+        e.target.style.color = '#fff';
+      });
+      samEditBtn.addEventListener('mouseleave', (e) => {
+        e.target.style.background = 'transparent';
+        e.target.style.color = '#3273dc';
+      });
+      samContainer.appendChild(samText);
+      samContainer.appendChild(samEditBtn);
+      samCell.appendChild(samContainer);
       
-      // Email column (no edit)
+      // Email column with edit icon
       const emailCell = document.createElement('td');
-      emailCell.textContent = user.mail || '';
+      const emailContainer = document.createElement('span');
+      emailContainer.className = 'is-inline-flex is-align-items-center';
+      const emailText = document.createElement('span');
+      emailText.textContent = user.mail || '';
+      const emailEditBtn = document.createElement('button');
+      emailEditBtn.className = 'button is-small is-text ml-2';
+      emailEditBtn.title = 'Edit email';
+      emailEditBtn.style.cssText = 'padding: 0.25rem; margin-left: 0.5rem; background: transparent; cursor: pointer; color: #3273dc;';
+      emailEditBtn.innerHTML = '✎';
+      emailEditBtn.addEventListener('click', () => {
+        editUserField(sam, 'mail', user.mail || '', 'Email');
+      });
+      emailEditBtn.addEventListener('mouseenter', (e) => {
+        e.target.style.background = '#3273dc';
+        e.target.style.color = '#fff';
+      });
+      emailEditBtn.addEventListener('mouseleave', (e) => {
+        e.target.style.background = 'transparent';
+        e.target.style.color = '#3273dc';
+      });
+      emailContainer.appendChild(emailText);
+      emailContainer.appendChild(emailEditBtn);
+      emailCell.appendChild(emailContainer);
       
       // Lock Status column (clickable)
       const lockCell = document.createElement('td');
