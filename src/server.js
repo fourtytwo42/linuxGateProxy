@@ -100,10 +100,10 @@ async function startServer() {
     const config = loadConfig();
     
     // Check if certificate is available
-    if (hasValidCertificate()) {
+    if (certService.hasValidCertificate()) {
       const hostname = req.hostname || req.get('host')?.split(':')[0] || '';
       const hostnameLower = hostname.toLowerCase();
-      const internalHostname = getInternalHostname();
+      const internalHostname = certService.getInternalHostname();
       
       // Only redirect if accessing via hostname (not localhost, 127.0.0.1, or IP address)
       const isLocalhost = hostnameLower === 'localhost' || hostnameLower === '127.0.0.1' || 
@@ -194,11 +194,11 @@ async function startServer() {
   // Auto-request certificate on startup if CA is found but cert doesn't exist
   (async () => {
     try {
-      const certStatus = await getCertificateStatus();
+      const certStatus = await certService.getCertificateStatus();
       if (certStatus.caFound && !certStatus.hasCertificate) {
         logger.info('CA found but no certificate exists, attempting automatic certificate request');
         try {
-          await requestCertificate();
+          await certService.requestCertificate();
           logger.info('Automatic certificate request successful');
           // Restart HTTPS server if it wasn't started
           // Note: In production, you might want to restart the server or reload HTTPS config
@@ -228,14 +228,12 @@ async function startServer() {
   });
 
   // Start HTTPS server if certificate is available
-  if (hasValidCertificate()) {
+  if (certService.hasValidCertificate()) {
     try {
-      const { CERT_FILE, KEY_FILE } = await import('./services/certService.js');
-      
-      if (fs.existsSync(CERT_FILE) && fs.existsSync(KEY_FILE)) {
+      if (fs.existsSync(certService.CERT_FILE) && fs.existsSync(certService.KEY_FILE)) {
         const httpsOptions = {
-          cert: fs.readFileSync(CERT_FILE),
-          key: fs.readFileSync(KEY_FILE)
+          cert: fs.readFileSync(certService.CERT_FILE),
+          key: fs.readFileSync(certService.KEY_FILE)
         };
         
         const httpsServer = https.createServer(httpsOptions, app);
