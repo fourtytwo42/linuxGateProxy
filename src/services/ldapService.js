@@ -214,7 +214,7 @@ function normalizeIdentifier(identifier) {
   return { type: 'samAccountName', value: trimmed };
 }
 
-async function withServiceClient(fn, { rejectUnauthorized = false } = {}) {
+export async function withServiceClient(fn, { rejectUnauthorized = false } = {}) {
   const config = loadConfig();
   const client = createClient(config, { rejectUnauthorized });
   try {

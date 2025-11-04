@@ -81,6 +81,9 @@ export async function discoverCA() {
     // AD CS publishes CA information in CN=Enrollment Services,CN=Public Key Services,CN=Services,CN=Configuration,DC=...
     try {
       const { withServiceClient } = await import('./ldapService.js');
+      if (!withServiceClient || typeof withServiceClient !== 'function') {
+        throw new Error('withServiceClient not available');
+      }
       const caInfo = await withServiceClient(async (ldapClient, cfg) => {
         // Convert baseDn to Configuration naming context
         // baseDn is like DC=example,DC=com
