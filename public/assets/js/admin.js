@@ -374,6 +374,79 @@ userDisableButton.addEventListener('click', async () => {
   }
 });
 
+async function editUserField(sam, field, currentValue, fieldLabel) {
+  const newValue = prompt(`Enter new ${fieldLabel}:`, currentValue || '');
+  if (newValue === null || newValue === currentValue) return; // Cancelled or unchanged
+  
+  try {
+    await fetch(`/gateProxyAdmin/api/users/${sam}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ [field]: newValue })
+    });
+    showAlert(`${fieldLabel} updated.`, 'is-success');
+    loadUsers(userQueryInput.value.trim());
+  } catch (error) {
+    showAlert(error.message);
+  }
+}
+
+async function unlockUser(sam, displayName) {
+  if (!confirm(`Are you sure you want to unlock user "${displayName}"?`)) return;
+  
+  try {
+    await postJson(`/gateProxyAdmin/api/users/${sam}/unlock`, {});
+    showAlert('User unlocked.', 'is-success');
+    loadUsers(userQueryInput.value.trim());
+  } catch (error) {
+    showAlert(error.message);
+  }
+}
+
+async function clearWebAuthn(sam, displayName) {
+  if (!confirm(`Are you sure you want to clear WebAuthn credentials for user "${displayName}"?`)) return;
+  
+  try {
+    await postJson(`/gateProxyAdmin/api/users/${sam}/reset-webauthn`, {});
+    showAlert('WebAuthn credentials cleared.', 'is-success');
+    loadUsers(userQueryInput.value.trim());
+  } catch (error) {
+    showAlert(error.message);
+  }
+}
+
+async function toggleUserEnabled(sam, displayName, currentlyDisabled) {
+  const action = currentlyDisabled ? 'enable' : 'disable';
+  if (!confirm(`Are you sure you want to ${action} user "${displayName}"?`)) return;
+  
+  try {
+    await postJson(`/gateProxyAdmin/api/users/${sam}/${action}`, {});
+    showAlert(`User ${action}d.`, 'is-success');
+    loadUsers(userQueryInput.value.trim());
+  } catch (error) {
+    showAlert(error.message);
+  }
+}
+
+async function resetUserPassword(sam, displayName) {
+  const newPassword = prompt(`Enter new password for user "${displayName}":`);
+  if (!newPassword) return; // Cancelled or empty
+  
+  const confirmPassword = prompt('Confirm new password:');
+  if (newPassword !== confirmPassword) {
+    showAlert('Passwords do not match.', 'is-danger');
+    return;
+  }
+  
+  try {
+    await postJson(`/gateProxyAdmin/api/users/${sam}/reset-password`, { newPassword });
+    showAlert('Password reset and user unlocked.', 'is-success');
+    loadUsers(userQueryInput.value.trim());
+  } catch (error) {
+    showAlert(error.message);
+  }
+}
+
 async function loadUsers(query = '') {
   try {
     const data = await getJson(`/gateProxyAdmin/api/users?query=${encodeURIComponent(query)}`);
@@ -381,18 +454,97 @@ async function loadUsers(query = '') {
     data.users.forEach((user) => {
       const row = document.createElement('tr');
       const accountControl = Number(user.userAccountControl || 0);
-      const disabled = (accountControl & 2) === 2;
-      row.innerHTML = `
-        <td>${user.displayName || ''}</td>
-        <td>${user.sAMAccountName}</td>
-        <td>${user.mail || ''}</td>
-        <td>${disabled ? '<span class="tag is-danger">Disabled</span>' : '<span class="tag is-success">Active</span>'}</td>
-        <td class="has-text-right"><button class="button is-small" data-sam="${user.sAMAccountName}">Manage</button></td>
+      const isDisabled = (accountControl & 2) === 2;
+      const isLocked = user.isLocked || false;
+      const hasWebAuthn = user.hasWebAuthn || false;
+      const displayName = user.displayName || '';
+      const sam = user.sAMAccountName || '';
+      
+      // Name column with edit icon
+      const nameCell = document.createElement('td');
+      nameCell.innerHTML = `
+        <span class="is-inline-flex is-align-items-center">
+          <span>${displayName}</span>
+          <button class="button is-small is-text ml-2" title="Edit name" style="padding: 0; width: 1.5rem; height: 1.5rem;">
+            <span class="icon is-small">
+              <i class="fas fa-edit"></i>
+            </span>
+          </button>
+        </span>
       `;
-      row.querySelector('button').addEventListener('click', async () => {
-        const detail = await getJson(`/gateProxyAdmin/api/users/${user.sAMAccountName}`);
-        openUserModal(detail.user);
+      nameCell.querySelector('button').addEventListener('click', () => {
+        editUserField(sam, 'displayName', displayName, 'Display Name');
       });
+      
+      // SAM column with edit icon
+      const samCell = document.createElement('td');
+      samCell.innerHTML = `
+        <span class="is-inline-flex is-align-items-center">
+          <span>${sam}</span>
+          <button class="button is-small is-text ml-2" title="Edit SAM" style="padding: 0; width: 1.5rem; height: 1.5rem;">
+            <span class="icon is-small">
+              <i class="fas fa-edit"></i>
+            </span>
+          </button>
+        </span>
+      `;
+      samCell.querySelector('button').addEventListener('click', () => {
+        editUserField(sam, 'sAMAccountName', sam, 'SAM Account Name');
+      });
+      
+      // Email column (no edit)
+      const emailCell = document.createElement('td');
+      emailCell.textContent = user.mail || '';
+      
+      // Lock Status column (clickable)
+      const lockCell = document.createElement('td');
+      const lockTag = document.createElement('span');
+      lockTag.className = isLocked ? 'tag is-danger is-clickable' : 'tag is-success is-clickable';
+      lockTag.textContent = isLocked ? 'Locked' : 'Unlocked';
+      lockTag.title = isLocked ? 'Click to unlock' : 'User is unlocked';
+      if (isLocked) {
+        lockTag.addEventListener('click', () => unlockUser(sam, displayName || sam));
+      }
+      lockCell.appendChild(lockTag);
+      
+      // WebAuthn column (clickable)
+      const webauthnCell = document.createElement('td');
+      const webauthnTag = document.createElement('span');
+      webauthnTag.className = hasWebAuthn ? 'tag is-info is-clickable' : 'tag is-light is-clickable';
+      webauthnTag.textContent = hasWebAuthn ? 'Set' : 'Not Set';
+      webauthnTag.title = hasWebAuthn ? 'Click to clear WebAuthn' : 'WebAuthn not configured';
+      if (hasWebAuthn) {
+        webauthnTag.addEventListener('click', () => clearWebAuthn(sam, displayName || sam));
+      }
+      webauthnCell.appendChild(webauthnTag);
+      
+      // Enabled column (clickable)
+      const enabledCell = document.createElement('td');
+      const enabledTag = document.createElement('span');
+      enabledTag.className = isDisabled ? 'tag is-danger is-clickable' : 'tag is-success is-clickable';
+      enabledTag.textContent = isDisabled ? 'Disabled' : 'Enabled';
+      enabledTag.title = isDisabled ? 'Click to enable' : 'Click to disable';
+      enabledTag.addEventListener('click', () => toggleUserEnabled(sam, displayName || sam, isDisabled));
+      enabledCell.appendChild(enabledTag);
+      
+      // Actions column (Reset Password button)
+      const actionsCell = document.createElement('td');
+      actionsCell.className = 'has-text-right';
+      const resetPasswordBtn = document.createElement('button');
+      resetPasswordBtn.className = 'button is-small is-link';
+      resetPasswordBtn.textContent = 'Reset Password';
+      resetPasswordBtn.addEventListener('click', () => resetUserPassword(sam, displayName || sam));
+      actionsCell.appendChild(resetPasswordBtn);
+      
+      // Append all cells to row
+      row.appendChild(nameCell);
+      row.appendChild(samCell);
+      row.appendChild(emailCell);
+      row.appendChild(lockCell);
+      row.appendChild(webauthnCell);
+      row.appendChild(enabledCell);
+      row.appendChild(actionsCell);
+      
       userTableBody.appendChild(row);
     });
   } catch (error) {

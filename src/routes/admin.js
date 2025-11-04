@@ -10,7 +10,8 @@ import {
   unlockAccount,
   enableAccount,
   disableAccount,
-  writeWebAuthnCredentials
+  writeWebAuthnCredentials,
+  readWebAuthnCredentials
 } from '../services/ldapService.js';
 import { requireAdmin } from '../middleware/auth.js';
 import { publicDir } from '../utils/paths.js';
@@ -93,7 +94,31 @@ router.get('/gateProxyAdmin/api/users', requireAdmin, async (req, res, next) => 
   try {
     const { query = '', page = 1, size = 25 } = req.query;
     const users = await searchUsers({ query, page: Number(page), size: Number(size) });
-    res.json({ users });
+    
+    // Enrich each user with lock status and WebAuthn status
+    const enrichedUsers = await Promise.all(users.map(async (user) => {
+      const userDn = user.distinguishedName || user.dn;
+      const lockoutTime = parseInt(user.lockoutTime || '0', 10);
+      const isLocked = lockoutTime > 0;
+      
+      // Check WebAuthn credentials
+      let hasWebAuthn = false;
+      try {
+        const credentials = await readWebAuthnCredentials(userDn);
+        hasWebAuthn = credentials && credentials.length > 0;
+      } catch (error) {
+        // If we can't read WebAuthn, assume false
+        hasWebAuthn = false;
+      }
+      
+      return {
+        ...user,
+        isLocked,
+        hasWebAuthn
+      };
+    }));
+    
+    res.json({ users: enrichedUsers });
   } catch (error) {
     next(error);
   }
@@ -127,10 +152,20 @@ router.patch('/gateProxyAdmin/api/users/:sam', requireAdmin, async (req, res, ne
     if (!user) {
       return res.status(404).json({ error: 'User not found' });
     }
-    await updateContactInfo(user.distinguishedName || user.dn, {
-      mail: req.body.mail,
-      telephoneNumber: req.body.telephoneNumber
-    });
+    const updateFields = {};
+    if (req.body.displayName !== undefined) {
+      updateFields.displayName = req.body.displayName;
+    }
+    if (req.body.sAMAccountName !== undefined) {
+      updateFields.sAMAccountName = req.body.sAMAccountName;
+    }
+    if (req.body.mail !== undefined) {
+      updateFields.mail = req.body.mail;
+    }
+    if (req.body.telephoneNumber !== undefined) {
+      updateFields.telephoneNumber = req.body.telephoneNumber;
+    }
+    await updateContactInfo(user.distinguishedName || user.dn, updateFields);
     res.json({ success: true });
   } catch (error) {
     next(error);
@@ -143,7 +178,10 @@ router.post('/gateProxyAdmin/api/users/:sam/reset-password', requireAdmin, async
     if (!user) {
       return res.status(404).json({ error: 'User not found' });
     }
-    await resetPassword(user.distinguishedName || user.dn, req.body.newPassword);
+    const userDn = user.distinguishedName || user.dn;
+    await resetPassword(userDn, req.body.newPassword);
+    // Also unlock the user when resetting password
+    await unlockAccount(userDn);
     res.json({ success: true });
   } catch (error) {
     next(error);
@@ -157,6 +195,19 @@ router.post('/gateProxyAdmin/api/users/:sam/unlock', requireAdmin, async (req, r
       return res.status(404).json({ error: 'User not found' });
     }
     await unlockAccount(user.distinguishedName || user.dn);
+    await enableAccount(user.distinguishedName || user.dn);
+    res.json({ success: true });
+  } catch (error) {
+    next(error);
+  }
+});
+
+router.post('/gateProxyAdmin/api/users/:sam/enable', requireAdmin, async (req, res, next) => {
+  try {
+    const user = await findUser(req.params.sam);
+    if (!user) {
+      return res.status(404).json({ error: 'User not found' });
+    }
     await enableAccount(user.distinguishedName || user.dn);
     res.json({ success: true });
   } catch (error) {

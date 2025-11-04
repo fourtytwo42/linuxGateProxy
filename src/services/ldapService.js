@@ -411,7 +411,7 @@ export async function searchUsers({ query, size = 25, page = 1 }) {
         pageSize: size,
         page
       },
-      attributes: ['distinguishedName', 'displayName', 'sAMAccountName', 'mail', 'userAccountControl']
+      attributes: ['distinguishedName', 'displayName', 'sAMAccountName', 'mail', 'userAccountControl', 'lockoutTime']
     });
     
     // Additional safety filter: filter out any accounts that might have slipped through
