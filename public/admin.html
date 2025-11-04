@@ -47,7 +47,7 @@
                         <p class="card-header-title">Domain Controller Setup</p>
                       </div>
                       <div class="card-content">
-                        <p class="mb-4">Configures your domain controller for Linux Gate Proxy integration. Creates service account, firewall rules, and DNS records.</p>
+                        <p class="mb-4">Updates Active Directory schema to add custom attributes for session storage and WebAuthn credentials. Must be run on Schema Master DC with Schema Admin privileges.</p>
                         <div class="field">
                           <label class="label">Download Scripts:</label>
                           <div class="buttons">
@@ -84,7 +84,7 @@
                         <p class="card-header-title">Certificate Server Setup</p>
                       </div>
                       <div class="card-content">
-                        <p class="mb-4">Configures your certificate authority to issue WebAuthn certificates for Gate Proxy.</p>
+                        <p class="mb-4">Configures your certificate authority (AD CS) to issue SSL certificates. Creates certificate templates for automatic certificate enrollment. After setup, Gate Proxy will automatically discover and request certificates.</p>
                         <div class="field">
                           <label class="label">Download Scripts:</label>
                           <div class="buttons">

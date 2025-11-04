@@ -2,6 +2,7 @@ import http from 'http';
 import path from 'path';
 import os from 'os';
 import express from 'express';
+import https from 'https';
 import helmet from 'helmet';
 import cookieParser from 'cookie-parser';
 
@@ -89,6 +90,40 @@ async function startServer() {
   app.use(express.urlencoded({ extended: false }));
   app.use(cookieParser());
 
+  // Redirect HTTP to HTTPS for hostname requests (if certificate is available)
+  // But allow HTTP for localhost, 127.0.0.1, and IP addresses
+  app.use((req, res, next) => {
+    if (req.secure || req.protocol === 'https') {
+      return next();
+    }
+    
+    const config = loadConfig();
+    
+    // Check if certificate is available
+    if (hasValidCertificate()) {
+      const hostname = req.hostname || req.get('host')?.split(':')[0] || '';
+      const hostnameLower = hostname.toLowerCase();
+      const internalHostname = getInternalHostname();
+      
+      // Only redirect if accessing via hostname (not localhost, 127.0.0.1, or IP address)
+      const isLocalhost = hostnameLower === 'localhost' || hostnameLower === '127.0.0.1' || 
+                         hostnameLower.startsWith('192.168.') || 
+                         hostnameLower.startsWith('10.') || 
+                         hostnameLower.startsWith('172.') ||
+                         /^\d+\.\d+\.\d+\.\d+$/.test(hostnameLower);
+      
+      // Redirect if accessing via hostname (matches internal hostname or is a domain name, not IP/localhost)
+      if (!isLocalhost && (hostnameLower === internalHostname.toLowerCase() || !/^\d+\.\d+\.\d+\.\d+$/.test(hostnameLower))) {
+        // Redirect to HTTPS (port 5443 for internal HTTPS, or 443 if behind proxy)
+        const httpsPort = config.site?.httpsPort || 5443;
+        const httpsUrl = `https://${hostname}${httpsPort !== 443 ? ':' + httpsPort : ''}${req.originalUrl}`;
+        return res.redirect(301, httpsUrl);
+      }
+    }
+    
+    return next();
+  });
+
   app.use(express.static(publicDir, { index: false }));
   app.use('/assets', express.static(path.join(publicDir, 'assets')));
 
@@ -172,6 +207,33 @@ async function startServer() {
   server.listen(endpoint.port, endpoint.address, () => {
     logger.info('Server listening', { listenAddress: endpoint.address, listenPort: endpoint.port });
   });
+
+  // Start HTTPS server if certificate is available
+  if (hasValidCertificate()) {
+    try {
+      const { CERT_FILE, KEY_FILE } = await import('./services/certService.js');
+      
+      if (fs.existsSync(CERT_FILE) && fs.existsSync(KEY_FILE)) {
+        const httpsOptions = {
+          cert: fs.readFileSync(CERT_FILE),
+          key: fs.readFileSync(KEY_FILE)
+        };
+        
+        const httpsServer = https.createServer(httpsOptions, app);
+        const httpsPort = config.site?.httpsPort || 5443;
+        
+        httpsServer.listen(httpsPort, endpoint.address, () => {
+          logger.info('HTTPS server listening', { listenAddress: endpoint.address, listenPort: httpsPort });
+        });
+        
+        httpsServer.on('error', (error) => {
+          logger.error('HTTPS server error', { error: error.message });
+        });
+      }
+    } catch (error) {
+      logger.warn('Could not start HTTPS server', { error: error.message });
+    }
+  }
 
   server.on('error', (error) => {
     if (error.code === 'EADDRNOTAVAIL' || error.code === 'EADDRINUSE') {

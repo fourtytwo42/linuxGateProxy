@@ -94,6 +94,16 @@ function renderStatusCards() {
   const tunnelStatus = settings.cloudflare?.isLinked 
     ? (settings.cloudflare.tunnelName ? `Linked (${settings.cloudflare.tunnelName})` : 'Linked')
     : 'Unlinked';
+  
+  // Certificate status
+  const certStatus = settings.certificate || {};
+  const certStatusText = certStatus.hasCertificate 
+    ? `Valid (${certStatus.internalHostname || 'installed'})`
+    : 'Not installed';
+  const caStatusText = certStatus.caFound
+    ? `Found (${certStatus.caServer || 'discovered'})`
+    : 'Not found';
+  
   const cards = [
     {
       title: 'Public URL',
@@ -104,15 +114,42 @@ function renderStatusCards() {
       value: tunnelStatus
     },
     {
+      title: 'SSL Certificate',
+      value: certStatusText
+    },
+    {
+      title: 'Certificate Authority',
+      value: caStatusText
+    },
+    {
       title: 'Resources',
       value: `${resources.length} configured`
     }
   ];
   cards.forEach((card) => {
     const column = document.createElement('div');
-    column.className = 'column is-one-third';
+    column.className = 'column';
+    // Use is-one-quarter for 5 cards in a row, or adjust based on number of cards
+    if (cards.length === 5) {
+      column.className = 'column is-one-fifth';
+    } else if (cards.length === 4) {
+      column.className = 'column is-one-quarter';
+    } else {
+      column.className = 'column is-one-third';
+    }
+    
+    // Color coding for status
+    let notificationClass = 'is-primary';
+    if (card.title === 'SSL Certificate') {
+      notificationClass = card.value.includes('Not installed') ? 'is-warning' : 'is-success';
+    } else if (card.title === 'Certificate Authority') {
+      notificationClass = card.value.includes('Not found') ? 'is-warning' : 'is-success';
+    } else if (card.title === 'Cloudflare Tunnel') {
+      notificationClass = card.value.includes('Unlinked') ? 'is-warning' : 'is-success';
+    }
+    
     column.innerHTML = `
-      <div class="notification is-primary">
+      <div class="notification ${notificationClass}">
         <p class="title is-5">${card.title}</p>
         <p>${card.value}</p>
       </div>

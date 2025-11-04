@@ -18,6 +18,7 @@ import { requireAdmin } from '../middleware/auth.js';
 import { publicDir } from '../utils/paths.js';
 import { storeSmtpPassword } from '../services/otpService.js';
 import { hasCertificate, listTunnels, getTunnelToken } from '../services/cloudflareService.js';
+import { getCertificateStatus } from '../services/certService.js';
 
 const router = Router();
 
@@ -83,8 +84,9 @@ router.get('/gateProxyAdmin/api/session', requireAdmin, (req, res) => {
   });
 });
 
-router.get('/gateProxyAdmin/api/settings', requireAdmin, (req, res) => {
+router.get('/gateProxyAdmin/api/settings', requireAdmin, async (req, res) => {
   const config = loadConfig();
+  const certStatus = await getCertificateStatus();
   res.json({
     site: config.site,
     auth: config.auth,
@@ -95,7 +97,8 @@ router.get('/gateProxyAdmin/api/settings', requireAdmin, (req, res) => {
       tunnelName: config.cloudflare.tunnelName,
       credentialFile: config.cloudflare.credentialFile,
       isLinked: hasCertificate()
-    }
+    },
+    certificate: certStatus
   });
 });
 
