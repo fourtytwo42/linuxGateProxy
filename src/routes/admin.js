@@ -18,11 +18,11 @@ import { storeSmtpPassword } from '../services/otpService.js';
 
 const router = Router();
 
-router.get('/getProxyAdmin', requireAdmin, (req, res) => {
+router.get('/gateProxyAdmin', requireAdmin, (req, res) => {
   res.sendFile(path.join(publicDir, 'admin.html'));
 });
 
-router.get('/getProxyAdmin/api/session', requireAdmin, (req, res) => {
+router.get('/gateProxyAdmin/api/session', requireAdmin, (req, res) => {
   res.json({
     user: {
       samAccountName: req.auth.user.sAMAccountName,
@@ -32,7 +32,7 @@ router.get('/getProxyAdmin/api/session', requireAdmin, (req, res) => {
   });
 });
 
-router.get('/getProxyAdmin/api/settings', requireAdmin, (req, res) => {
+router.get('/gateProxyAdmin/api/settings', requireAdmin, (req, res) => {
   const config = loadConfig();
   res.json({
     site: config.site,
@@ -47,17 +47,17 @@ router.get('/getProxyAdmin/api/settings', requireAdmin, (req, res) => {
   });
 });
 
-router.post('/getProxyAdmin/api/settings/site', requireAdmin, (req, res) => {
+router.post('/gateProxyAdmin/api/settings/site', requireAdmin, (req, res) => {
   saveConfigSection('site', { ...loadConfig().site, ...req.body });
   res.json({ success: true });
 });
 
-router.post('/getProxyAdmin/api/settings/auth', requireAdmin, (req, res) => {
+router.post('/gateProxyAdmin/api/settings/auth', requireAdmin, (req, res) => {
   saveConfigSection('auth', { ...loadConfig().auth, ...req.body });
   res.json({ success: true });
 });
 
-router.post('/getProxyAdmin/api/settings/smtp', requireAdmin, (req, res) => {
+router.post('/gateProxyAdmin/api/settings/smtp', requireAdmin, (req, res) => {
   const config = loadConfig();
   const { password, ...rest } = req.body;
   if (password) {
@@ -67,11 +67,11 @@ router.post('/getProxyAdmin/api/settings/smtp', requireAdmin, (req, res) => {
   res.json({ success: true });
 });
 
-router.get('/getProxyAdmin/api/resources', requireAdmin, (req, res) => {
+router.get('/gateProxyAdmin/api/resources', requireAdmin, (req, res) => {
   res.json({ resources: listResources() });
 });
 
-router.post('/getProxyAdmin/api/resources', requireAdmin, (req, res) => {
+router.post('/gateProxyAdmin/api/resources', requireAdmin, (req, res) => {
   const resource = {
     id: req.body.id,
     name: req.body.name,
@@ -84,12 +84,12 @@ router.post('/getProxyAdmin/api/resources', requireAdmin, (req, res) => {
   res.json({ success: true });
 });
 
-router.delete('/getProxyAdmin/api/resources/:id', requireAdmin, (req, res) => {
+router.delete('/gateProxyAdmin/api/resources/:id', requireAdmin, (req, res) => {
   deleteResource(req.params.id);
   res.json({ success: true });
 });
 
-router.get('/getProxyAdmin/api/users', requireAdmin, async (req, res, next) => {
+router.get('/gateProxyAdmin/api/users', requireAdmin, async (req, res, next) => {
   try {
     const { query = '', page = 1, size = 25 } = req.query;
     const users = await searchUsers({ query, page: Number(page), size: Number(size) });
@@ -99,7 +99,7 @@ router.get('/getProxyAdmin/api/users', requireAdmin, async (req, res, next) => {
   }
 });
 
-router.get('/getProxyAdmin/api/groups', requireAdmin, async (req, res, next) => {
+router.get('/gateProxyAdmin/api/groups', requireAdmin, async (req, res, next) => {
   try {
     const { query = '', page = 1, size = 50 } = req.query;
     const groups = await searchGroups({ query, page: Number(page), size: Number(size) });
@@ -109,7 +109,7 @@ router.get('/getProxyAdmin/api/groups', requireAdmin, async (req, res, next) => 
   }
 });
 
-router.get('/getProxyAdmin/api/users/:sam', requireAdmin, async (req, res, next) => {
+router.get('/gateProxyAdmin/api/users/:sam', requireAdmin, async (req, res, next) => {
   try {
     const user = await findUser(req.params.sam, { attributes: ['memberOf', 'mail', 'displayName', 'telephoneNumber'] });
     if (!user) {
@@ -121,7 +121,7 @@ router.get('/getProxyAdmin/api/users/:sam', requireAdmin, async (req, res, next)
   }
 });
 
-router.patch('/getProxyAdmin/api/users/:sam', requireAdmin, async (req, res, next) => {
+router.patch('/gateProxyAdmin/api/users/:sam', requireAdmin, async (req, res, next) => {
   try {
     const user = await findUser(req.params.sam);
     if (!user) {
@@ -137,7 +137,7 @@ router.patch('/getProxyAdmin/api/users/:sam', requireAdmin, async (req, res, nex
   }
 });
 
-router.post('/getProxyAdmin/api/users/:sam/reset-password', requireAdmin, async (req, res, next) => {
+router.post('/gateProxyAdmin/api/users/:sam/reset-password', requireAdmin, async (req, res, next) => {
   try {
     const user = await findUser(req.params.sam);
     if (!user) {
@@ -150,7 +150,7 @@ router.post('/getProxyAdmin/api/users/:sam/reset-password', requireAdmin, async 
   }
 });
 
-router.post('/getProxyAdmin/api/users/:sam/unlock', requireAdmin, async (req, res, next) => {
+router.post('/gateProxyAdmin/api/users/:sam/unlock', requireAdmin, async (req, res, next) => {
   try {
     const user = await findUser(req.params.sam);
     if (!user) {
@@ -164,7 +164,7 @@ router.post('/getProxyAdmin/api/users/:sam/unlock', requireAdmin, async (req, re
   }
 });
 
-router.post('/getProxyAdmin/api/users/:sam/disable', requireAdmin, async (req, res, next) => {
+router.post('/gateProxyAdmin/api/users/:sam/disable', requireAdmin, async (req, res, next) => {
   try {
     const user = await findUser(req.params.sam);
     if (!user) {
@@ -177,7 +177,7 @@ router.post('/getProxyAdmin/api/users/:sam/disable', requireAdmin, async (req, r
   }
 });
 
-router.post('/getProxyAdmin/api/users/:sam/reset-webauthn', requireAdmin, async (req, res, next) => {
+router.post('/gateProxyAdmin/api/users/:sam/reset-webauthn', requireAdmin, async (req, res, next) => {
   try {
     const user = await findUser(req.params.sam);
     if (!user) {
