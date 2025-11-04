@@ -1,0 +1,21 @@
+Update AD Schema
+
+Extends Active Directory schema to support GateProxy session and WebAuthn storage.
+
+WARNING - Important Requirements:
+- Must be run on the Schema Master Domain Controller
+- Requires Schema Admins group membership
+- Schema writes must be enabled (script will guide you)
+- Run ONCE per forest (not per domain)
+
+This will add AD attributes for:
+- gateProxySession - Session storage
+- gateProxyWebAuthn - WebAuthn credential storage
+
+Usage:
+  .\update.bat
+  OR
+  .\update_schema_gateproxy.ps1
+
+If you're not on the Schema Master DC, the script will provide instructions on how to proceed.
+
