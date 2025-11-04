@@ -240,34 +240,30 @@
                 <div class="column">
                   <div class="box">
                     <h3 class="title is-5 mb-4">1. Domain Controller Setup</h3>
-                    <p class="mb-4">Configures your domain controller for Linux Gate Proxy integration. Creates service account, firewall rules, and DNS records.</p>
+                    <p class="mb-4">Extends the Active Directory schema with Gate Proxy attributes for session storage and WebAuthn credentials. Run on the Schema Master while signed in as a Schema Admin.</p>
                     
                     <div class="field">
-                      <label class="label">Download Scripts:</label>
+                      <label class="label">Download Package:</label>
                       <div class="buttons">
-                        <a href="/share/configure-domain-controller.bat" class="button is-link is-outlined" download>
+                        <a href="/share/configure-domain-controller.zip" class="button is-link is-outlined" download>
                           <span class="icon"><i class="fas fa-download"></i></span>
-                          <span>configure-domain-controller.bat</span>
-                        </a>
-                        <a href="/share/configure-domain-controller.ps1" class="button is-link is-outlined" download>
-                          <span class="icon"><i class="fas fa-download"></i></span>
-                          <span>configure-domain-controller.ps1</span>
+                          <span>configure-domain-controller.zip</span>
                         </a>
                       </div>
+                      <p class="help">ZIP contains both <code>.bat</code> (auto-elevating) and <code>.ps1</code> scripts.</p>
                     </div>
 
                     <div class="message is-info mt-4">
                       <div class="message-body">
                         <p class="has-text-weight-semibold mb-2">How to Run:</p>
                         <ol class="ml-4" style="list-style-type: decimal;">
-                          <li class="mb-2">Download both files to your domain controller</li>
-                          <li class="mb-2">Double-click <code>configure-domain-controller.bat</code></li>
-                          <li class="mb-2">The script will automatically request administrator privileges</li>
-                          <li class="mb-2">When prompted, enter the tunnel hostname (e.g., tunnel.yourdomain.com)</li>
-                          <li class="mb-2">Enter the Gate Proxy host IP address</li>
-                          <li>Enter a password for the service account when prompted</li>
+                          <li class="mb-2">Download <code>configure-domain-controller.zip</code> to the Schema Master domain controller</li>
+                          <li class="mb-2">Extract the ZIP contents</li>
+                          <li class="mb-2">Right-click <code>configure-domain-controller.bat</code> &gt; Run as Administrator (or run the PowerShell script manually)</li>
+                          <li class="mb-2">Ensure you are logged in with Schema Admin rights; the script uses the current credentials</li>
+                          <li>Allow the script to complete the schema update. No additional input is required.</li>
                         </ol>
-                        <p class="mt-3"><strong>Note:</strong> The .bat file automatically runs as administrator. You can also run the .ps1 file directly if you prefer.</p>
+                        <p class="mt-3"><strong>Note:</strong> The batch file auto-elevates and simply calls the PowerShell script. Keep the extracted folder for future reruns.</p>
                       </div>
                     </div>
                   </div>
@@ -276,33 +272,30 @@
                 <div class="column">
                   <div class="box">
                     <h3 class="title is-5 mb-4">2. Certificate Server Setup</h3>
-                    <p class="mb-4">Configures your certificate authority to issue WebAuthn certificates for Gate Proxy.</p>
+                    <p class="mb-4">Prepares Active Directory Certificate Services (AD CS) to issue SSL certificates for Gate Proxy. Installs required roles/features and configures the CA for enrollment.</p>
                     
                     <div class="field">
-                      <label class="label">Download Scripts:</label>
+                      <label class="label">Download Package:</label>
                       <div class="buttons">
-                        <a href="/share/configure-certificate-server.bat" class="button is-link is-outlined" download>
+                        <a href="/share/configure-certificate-server.zip" class="button is-link is-outlined" download>
                           <span class="icon"><i class="fas fa-download"></i></span>
-                          <span>configure-certificate-server.bat</span>
-                        </a>
-                        <a href="/share/configure-certificate-server.ps1" class="button is-link is-outlined" download>
-                          <span class="icon"><i class="fas fa-download"></i></span>
-                          <span>configure-certificate-server.ps1</span>
+                          <span>configure-certificate-server.zip</span>
                         </a>
                       </div>
+                      <p class="help">ZIP contains both <code>.bat</code> (auto-elevating) and <code>.ps1</code> scripts.</p>
                     </div>
 
                     <div class="message is-info mt-4">
                       <div class="message-body">
                         <p class="has-text-weight-semibold mb-2">How to Run:</p>
                         <ol class="ml-4" style="list-style-type: decimal;">
-                          <li class="mb-2">Download both files to your certificate server</li>
-                          <li class="mb-2">Double-click <code>configure-certificate-server.bat</code></li>
-                          <li class="mb-2">The script will automatically request administrator privileges</li>
-                          <li class="mb-2">When prompted, enter the external hostname (e.g., sora2jailbreak.com)</li>
-                          <li>The script will create a certificate template and submit a certificate request</li>
+                          <li class="mb-2">Download <code>configure-certificate-server.zip</code> to the server hosting AD CS</li>
+                          <li class="mb-2">Extract the ZIP contents</li>
+                          <li class="mb-2">Right-click <code>configure-certificate-server.bat</code> &gt; Run as Administrator (or execute the PowerShell script)</li>
+                          <li class="mb-2">Follow the guided prompts to install AD CS components if needed and configure the enterprise CA</li>
+                          <li>After completion, Gate Proxy can automatically request certificates from this CA.</li>
                         </ol>
-                        <p class="mt-3"><strong>Note:</strong> The .bat file automatically runs as administrator. You can also run the .ps1 file directly if you prefer.</p>
+                        <p class="mt-3"><strong>Note:</strong> Run as a user with Enterprise Admin / CA Admin permissions. The batch file will request elevation automatically.</p>
                       </div>
                     </div>
                   </div>

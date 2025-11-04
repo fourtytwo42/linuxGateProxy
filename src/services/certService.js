@@ -1,13 +1,13 @@
-import { spawn, execSync } from 'child_process';
+import { execSync } from 'child_process';
 import fs from 'fs';
 import path from 'path';
 import os from 'os';
 import { logger } from '../utils/logger.js';
-import { loadConfig } from '../config/index.js';
-import { commandExists } from '../utils/command.js';
-import { findUser } from './ldapService.js';
+import { loadConfig, getSecret } from '../config/index.js';
 import { ensureDirSync } from '../utils/fs.js';
 import crypto from 'crypto';
+import kerberos from 'kerberos';
+import { withServiceClient } from './ldapService.js';
 
 /**
  * Certificate Management Service
@@ -80,10 +80,6 @@ export async function discoverCA() {
     // Try to discover CA via LDAP
     // AD CS publishes CA information in CN=Enrollment Services,CN=Public Key Services,CN=Services,CN=Configuration,DC=...
     try {
-      const { withServiceClient } = await import('./ldapService.js');
-      if (!withServiceClient || typeof withServiceClient !== 'function') {
-        throw new Error('withServiceClient not available');
-      }
       const caInfo = await withServiceClient(async (ldapClient, cfg) => {
         // Convert baseDn to Configuration naming context
         // baseDn is like DC=example,DC=com
@@ -151,6 +147,132 @@ export function hasValidCertificate() {
     logger.error('Error checking certificate', { error: error.message });
     return false;
   }
+}
+
+function inferDomain(config) {
+  if (config.auth?.domain) {
+    return config.auth.domain;
+  }
+  if (config.auth?.baseDn) {
+    return config.auth.baseDn
+      .split(',')
+      .filter((part) => part.trim().toLowerCase().startsWith('dc='))
+      .map((part) => part.split('=')[1])
+      .join('.');
+  }
+  return undefined;
+}
+
+function getServiceAccountCredentials() {
+  const config = loadConfig();
+  const password = getSecret('auth.lookupPassword');
+
+  if (!config.auth?.lookupUser || !password) {
+    throw new Error('Service account credentials are not configured.');
+  }
+
+  let username = config.auth.lookupUser;
+  let domain = inferDomain(config);
+
+  if (username.includes('\\')) {
+    const [dom, user] = username.split('\\');
+    domain = dom;
+    username = user;
+  } else if (username.includes('@')) {
+    const [user, dom] = username.split('@');
+    username = user;
+    domain = dom;
+  }
+
+  if (!domain) {
+    throw new Error('Unable to determine Active Directory domain for Kerberos authentication.');
+  }
+
+  return {
+    user: username,
+    domain: domain.toUpperCase(),
+    password
+  };
+}
+
+function mergeCookies(existing = [], newCookies = []) {
+  const map = new Map();
+  for (const cookie of existing) {
+    const [name] = cookie.split('=');
+    map.set(name.trim(), cookie);
+  }
+  for (const cookie of newCookies) {
+    const [name] = cookie.split('=');
+    map.set(name.trim(), cookie);
+  }
+  return Array.from(map.values());
+}
+
+function cookiesToHeader(cookies = []) {
+  return cookies.map((cookie) => cookie.split(';')[0]).join('; ');
+}
+
+async function performKerberosHandshake(caServer) {
+  const credentials = getServiceAccountCredentials();
+
+  const client = await kerberos.initializeClient(`HTTP/${caServer}`, {
+    user: credentials.user,
+    password: credentials.password,
+    domain: credentials.domain,
+    canonicalize: true,
+    mechOID: kerberos.GSS_MECH_OID_SPNEGO,
+    gssFlags: kerberos.GSS_C_MUTUAL_FLAG | kerberos.GSS_C_SEQUENCE_FLAG
+  });
+
+  let outgoingToken = await client.step('');
+  let authHeader = `Negotiate ${outgoingToken}`;
+  let cookies = [];
+  let response;
+  const baseUrl = `http://${caServer}/certsrv/`;
+
+  for (let attempt = 0; attempt < 5; attempt += 1) {
+    const headers = {
+      'User-Agent': 'linuxGateProxy/1.0'
+    };
+    if (authHeader) {
+      headers.Authorization = authHeader;
+    }
+    if (cookies.length > 0) {
+      headers.Cookie = cookiesToHeader(cookies);
+    }
+
+    response = await fetch(baseUrl, {
+      method: 'GET',
+      headers,
+      redirect: 'manual'
+    });
+
+    let setCookies = response.headers.getSetCookie ? response.headers.getSetCookie() : [];
+    if ((!setCookies || setCookies.length === 0) && response.headers.get('set-cookie')) {
+      setCookies = [response.headers.get('set-cookie')];
+    }
+    cookies = mergeCookies(cookies, setCookies);
+
+    const negotiateHeader = response.headers.get('www-authenticate');
+    if (negotiateHeader && negotiateHeader.startsWith('Negotiate ')) {
+      const serverToken = negotiateHeader.substring('Negotiate '.length).trim();
+      outgoingToken = await client.step(serverToken);
+      authHeader = `Negotiate ${outgoingToken}`;
+    }
+
+    if (response.status !== 401) {
+      break;
+    }
+  }
+
+  if (response.status === 401) {
+    throw new Error('Kerberos authentication failed (401).');
+  }
+
+  return {
+    authHeader,
+    cookieHeader: cookiesToHeader(cookies)
+  };
 }
 
 /**
@@ -242,51 +364,63 @@ async function submitCSRToCA(csrPath, caServer, templateName = 'WebServer') {
  * For now, we provide a mechanism but it may require manual authentication
  */
 async function requestViaWebEnrollment(csrContent, caServer, templateName) {
-  // AD CS Web Enrollment typically requires:
-  // 1. Authenticate to /certsrv/ (gets session cookie)
-  // 2. POST to /certsrv/certfnsh.asp with the CSR
-  
-  // On Linux, we'd need:
-  // - NTLM/Kerberos authentication library (like 'httpntlm' or 'kerberos')
-  // - Or use curl with --negotiate/--ntlm flags
-  
-  // For now, we'll try using curl if available (supports NTLM via GSS-API)
   try {
-    const csrPath = path.join(CERT_DIR, 'request.csr');
-    
-    // Try to submit via curl with NTLM authentication
-    // This will only work if the system has Kerberos/GSS-API configured
+    const { authHeader, cookieHeader } = await performKerberosHandshake(caServer);
     const enrollmentUrl = `http://${caServer}/certsrv/certfnsh.asp`;
-    
-    // Base64 encode the CSR
-    const csrBase64 = Buffer.from(csrContent).toString('base64');
-    
-    // AD CS web enrollment form data
-    const formData = `Mode=newreq&CertRequest=${encodeURIComponent(csrBase64)}&CertAttrib=CertificateTemplate:${templateName}&TargetStoreFlags=0&SaveCert=yes`;
-    
-    try {
-      // Try curl with negotiate authentication (Kerberos/NTLM)
-      const result = execSync(
-        `curl -s --negotiate -u : -X POST -H "Content-Type: application/x-www-form-urlencoded" -d '${formData}' "${enrollmentUrl}"`,
-        { encoding: 'utf8', timeout: 30000 }
-      );
-      
-      // Parse response to extract certificate
-      // AD CS returns HTML, need to extract the certificate from the page
-      const certMatch = result.match(/-----BEGIN CERTIFICATE-----[\s\S]*?-----END CERTIFICATE-----/);
-      if (certMatch) {
-        logger.info('Certificate retrieved via web enrollment');
-        return certMatch[0];
-      }
-      
-      logger.debug('Web enrollment returned HTML but no certificate found in response');
-    } catch (curlError) {
-      logger.debug('curl enrollment failed (may require Kerberos/NTLM setup)', { error: curlError.message });
+    const body = new URLSearchParams({
+      Mode: 'newreq',
+      CertRequest: Buffer.from(csrContent).toString('base64'),
+      CertAttrib: `CertificateTemplate:${templateName}`,
+      TargetStoreFlags: '0',
+      SaveCert: 'yes'
+    });
+
+    const headers = {
+      'Content-Type': 'application/x-www-form-urlencoded',
+      'User-Agent': 'linuxGateProxy/1.0'
+    };
+    if (authHeader) {
+      headers.Authorization = authHeader;
     }
+    if (cookieHeader) {
+      headers.Cookie = cookieHeader;
+    }
+
+    const response = await fetch(enrollmentUrl, {
+      method: 'POST',
+      headers,
+      body: body.toString()
+    });
+
+    if (!response.ok) {
+      logger.warn('Kerberos web enrollment responded with non-success status', {
+        status: response.status,
+        statusText: response.statusText
+      });
+      return null;
+    }
+
+    const html = await response.text();
+    const certMatch = html.match(/-----BEGIN CERTIFICATE-----[\s\S]*?-----END CERTIFICATE-----/);
+    if (certMatch) {
+      logger.info('Certificate retrieved via Kerberos web enrollment');
+      return certMatch[0];
+    }
+
+    const textareaMatch = html.match(/<textarea[^>]*id="certnew"[^>]*>([^<]+)<\/textarea>/i);
+    if (textareaMatch) {
+      const certText = textareaMatch[1].trim();
+      if (certText.includes('BEGIN CERTIFICATE')) {
+        logger.info('Certificate retrieved via Kerberos web enrollment (textarea)');
+        return certText;
+      }
+    }
+
+    logger.warn('Kerberos web enrollment completed without certificate payload');
   } catch (error) {
-    logger.debug('Web enrollment method failed', { error: error.message });
+    logger.warn('Kerberos web enrollment failed', { error: error.message });
   }
-  
+
   return null;
 }
 

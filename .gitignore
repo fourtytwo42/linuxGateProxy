@@ -115,3 +115,6 @@ dist
 
 # Runtime data
 data/
+
+# Generated script archives
+scripts/*.zip

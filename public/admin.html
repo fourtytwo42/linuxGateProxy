@@ -47,30 +47,25 @@
                         <p class="card-header-title">Domain Controller Setup</p>
                       </div>
                       <div class="card-content">
-                        <p class="mb-4">Updates Active Directory schema to add custom attributes for session storage and WebAuthn credentials. Must be run on Schema Master DC with Schema Admin privileges.</p>
+                        <p class="mb-4">Extends Active Directory schema to add custom attributes for session storage and WebAuthn credentials. Must be run on Schema Master DC with Schema Admin privileges.</p>
                         <div class="field">
-                          <label class="label">Download Scripts:</label>
+                          <label class="label">Download Package:</label>
                           <div class="buttons">
-                            <a href="/share/configure-domain-controller.bat" class="button is-link is-outlined" download>
+                            <a href="/share/configure-domain-controller.zip" class="button is-link is-outlined" download>
                               <span class="icon"><i class="fas fa-download"></i></span>
-                              <span>configure-domain-controller.bat</span>
-                            </a>
-                            <a href="/share/configure-domain-controller.ps1" class="button is-link is-outlined" download>
-                              <span class="icon"><i class="fas fa-download"></i></span>
-                              <span>configure-domain-controller.ps1</span>
+                              <span>configure-domain-controller.zip</span>
                             </a>
                           </div>
+                          <p class="help">ZIP includes both <code>.bat</code> (auto-elevating) and <code>.ps1</code> scripts.</p>
                         </div>
                         <div class="message is-info mt-4">
                           <div class="message-body">
                             <p class="has-text-weight-semibold mb-2">Instructions:</p>
                             <ol class="ml-4" style="list-style-type: decimal;">
-                              <li class="mb-2">Download both files to your domain controller</li>
-                              <li class="mb-2">Double-click <code>configure-domain-controller.bat</code></li>
-                              <li class="mb-2">The script will automatically request administrator privileges</li>
-                              <li class="mb-2">When prompted, enter the tunnel hostname (e.g., tunnel.yourdomain.com)</li>
-                              <li class="mb-2">Enter the Gate Proxy host IP address</li>
-                              <li>Enter a password for the service account when prompted</li>
+                              <li class="mb-2">Download and extract <code>configure-domain-controller.zip</code> on the Schema Master domain controller</li>
+                              <li class="mb-2">Run <code>configure-domain-controller.bat</code> as Administrator (auto-elevates) or execute the PowerShell script manually</li>
+                              <li class="mb-2">Ensure the executing account is a member of Schema Admins; the script uses the current credentials</li>
+                              <li>Allow the script to finish extending the schema—no additional inputs are required.</li>
                             </ol>
                           </div>
                         </div>
@@ -86,27 +81,23 @@
                       <div class="card-content">
                         <p class="mb-4">Configures your certificate authority (AD CS) to issue SSL certificates. Creates certificate templates for automatic certificate enrollment. After setup, Gate Proxy will automatically discover and request certificates.</p>
                         <div class="field">
-                          <label class="label">Download Scripts:</label>
+                          <label class="label">Download Package:</label>
                           <div class="buttons">
-                            <a href="/share/configure-certificate-server.bat" class="button is-link is-outlined" download>
+                            <a href="/share/configure-certificate-server.zip" class="button is-link is-outlined" download>
                               <span class="icon"><i class="fas fa-download"></i></span>
-                              <span>configure-certificate-server.bat</span>
-                            </a>
-                            <a href="/share/configure-certificate-server.ps1" class="button is-link is-outlined" download>
-                              <span class="icon"><i class="fas fa-download"></i></span>
-                              <span>configure-certificate-server.ps1</span>
+                              <span>configure-certificate-server.zip</span>
                             </a>
                           </div>
+                          <p class="help">ZIP includes both <code>.bat</code> (auto-elevating) and <code>.ps1</code> scripts.</p>
                         </div>
                         <div class="message is-info mt-4">
                           <div class="message-body">
                             <p class="has-text-weight-semibold mb-2">Instructions:</p>
                             <ol class="ml-4" style="list-style-type: decimal;">
-                              <li class="mb-2">Download both files to your certificate server</li>
-                              <li class="mb-2">Double-click <code>configure-certificate-server.bat</code></li>
-                              <li class="mb-2">The script will automatically request administrator privileges</li>
-                              <li class="mb-2">When prompted, enter the external hostname (e.g., sora2jailbreak.com)</li>
-                              <li>The script will create a certificate template and submit a certificate request</li>
+                              <li class="mb-2">Download and extract <code>configure-certificate-server.zip</code> on the enterprise CA server</li>
+                              <li class="mb-2">Run <code>configure-certificate-server.bat</code> as Administrator (auto-elevates) or run the PowerShell script manually</li>
+                              <li class="mb-2">Follow the guided prompts to install AD CS roles/features (if missing) and configure the enterprise CA</li>
+                              <li>After completion, Gate Proxy can automatically enroll certificates from this CA.</li>
                             </ol>
                           </div>
                         </div>

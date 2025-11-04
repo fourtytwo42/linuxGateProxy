@@ -21,6 +21,7 @@
     "express-rate-limit": "^8.2.1",
     "helmet": "^8.1.0",
     "http-proxy": "^1.18.1",
+    "kerberos": "^2.0.1",
     "ldapts": "^8.0.9",
     "nodemailer": "^7.0.10"
   },

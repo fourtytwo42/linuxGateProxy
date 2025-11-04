@@ -5,11 +5,10 @@ import express from 'express';
 import https from 'https';
 import helmet from 'helmet';
 import cookieParser from 'cookie-parser';
+import { execFileSync } from 'child_process';
 
 import { ensureDirSync } from './utils/fs.js';
 import { dataDir, runtimeDir, tempDir, shareDir, publicDir, projectRoot } from './utils/paths.js';
-
-const scriptsDir = path.join(projectRoot, 'scripts');
 import fs from 'fs';
 import { loadConfig } from './config/index.js';
 import { authenticate, requireAuth } from './middleware/auth.js';
@@ -19,12 +18,52 @@ import { adminRouter } from './routes/admin.js';
 import { resourceRouter } from './routes/resources.js';
 import { handleProxy, upgradeProxy } from './services/proxyService.js';
 import * as certService from './services/certService.js';
-
 import { purgeExpiredOtps } from './services/otpService.js';
 import { logger } from './utils/logger.js';
 
+const scriptsDir = path.join(projectRoot, 'scripts');
+
+const scriptBundles = [
+  {
+    zipName: 'configure-domain-controller.zip',
+    files: ['configure-domain-controller.ps1', 'configure-domain-controller.bat']
+  },
+  {
+    zipName: 'configure-certificate-server.zip',
+    files: ['configure-certificate-server.ps1', 'configure-certificate-server.bat']
+  },
+  {
+    zipName: 'update-schema-gateproxy.zip',
+    files: ['update-schema-gateproxy.ps1', 'update-schema-gateproxy.bat', 'update-schema-gateproxy.txt']
+  }
+];
+
 function bootstrapDirectories() {
   [dataDir, runtimeDir, tempDir, shareDir].forEach((dir) => ensureDirSync(dir));
+}
+
+function ensureScriptArchives() {
+  if (!fs.existsSync(scriptsDir)) {
+    logger.warn('Scripts directory not found; skipping archive build', { scriptsDir });
+    return;
+  }
+
+  for (const bundle of scriptBundles) {
+    const missing = bundle.files.filter((file) => !fs.existsSync(path.join(scriptsDir, file)));
+    if (missing.length > 0) {
+      logger.warn('Skipping script archive (missing files)', { zip: bundle.zipName, missing });
+      continue;
+    }
+
+    try {
+      const zipPath = path.join(scriptsDir, bundle.zipName);
+      const args = ['-j', '-q', zipPath, ...bundle.files.map((file) => path.join(scriptsDir, file))];
+      execFileSync('zip', args, { stdio: 'ignore' });
+      logger.debug('Updated script archive', { zip: bundle.zipName });
+    } catch (error) {
+      logger.warn('Failed to create script archive', { zip: bundle.zipName, error: error.message });
+    }
+  }
 }
 
 function resolveListenEndpoint(config) {
@@ -57,6 +96,7 @@ function resolveListenEndpoint(config) {
 
 async function startServer() {
   bootstrapDirectories();
+  ensureScriptArchives();
 
   const app = express();
 
