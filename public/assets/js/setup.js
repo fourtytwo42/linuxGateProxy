@@ -256,10 +256,15 @@ setupImportFile?.addEventListener('change', async (event) => {
   const file = event.target.files?.[0];
   if (!file) return;
   
+  // Check if it's a ZIP file
+  if (!file.name.endsWith('.zip') && file.type !== 'application/zip' && file.type !== 'application/x-zip-compressed') {
+    showAlert('Please upload a ZIP file (gate-proxy-config.zip)');
+    setupImportFile.value = '';
+    return;
+  }
+  
   try {
     clearAlert();
-    const content = await file.text();
-    const importData = JSON.parse(content);
     
     if (!confirm('Importing configuration will overwrite current settings and complete setup. Continue?')) {
       setupImportFile.value = '';
@@ -270,10 +275,12 @@ setupImportFile?.addEventListener('change', async (event) => {
     setupImportButton.disabled = true;
     setupImportButton.textContent = 'Importing...';
     
+    const formData = new FormData();
+    formData.append('config', file);
+    
     const response = await fetch('/api/setup/import', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(importData)
+      body: formData
     });
     
     const result = await response.json();

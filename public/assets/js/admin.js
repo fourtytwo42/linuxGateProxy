@@ -859,14 +859,19 @@ userQueryInput?.addEventListener('keydown', (event) => {
 
 exportSettingsButton?.addEventListener('click', async () => {
   try {
-    const data = await getJson('/gateProxyAdmin/api/settings/export');
-    const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+    const response = await fetch('/gateProxyAdmin/api/settings/export');
+    if (!response.ok) {
+      const error = await response.json();
+      throw new Error(error.error || 'Export failed');
+    }
+    const blob = await response.blob();
     const url = URL.createObjectURL(blob);
     const link = document.createElement('a');
     link.href = url;
-    link.download = 'gateproxy-settings.json';
+    link.download = 'gate-proxy-config.zip';
     link.click();
     URL.revokeObjectURL(url);
+    showAlert('Configuration exported successfully.', 'success');
   } catch (error) {
     showAlert(error.message);
   }
@@ -879,12 +884,35 @@ importSettingsButton?.addEventListener('click', () => {
 importSettingsFile?.addEventListener('change', async (event) => {
   const file = event.target.files?.[0];
   if (!file) return;
+  
+  // Check if it's a ZIP file
+  if (!file.name.endsWith('.zip') && file.type !== 'application/zip' && file.type !== 'application/x-zip-compressed') {
+    showAlert('Please upload a ZIP file (gate-proxy-config.zip)');
+    importSettingsFile.value = '';
+    return;
+  }
+  
   try {
-    const content = await file.text();
-    const payload = JSON.parse(content);
-    if (!confirm('Importing settings will overwrite current configuration. Continue?')) return;
-    await postJson('/gateProxyAdmin/api/settings/import', payload);
-    showAlert('Settings imported.', 'success');
+    if (!confirm('Importing configuration will overwrite current settings. Continue?')) {
+      importSettingsFile.value = '';
+      return;
+    }
+    
+    const formData = new FormData();
+    formData.append('config', file);
+    
+    const response = await fetch('/gateProxyAdmin/api/settings/import', {
+      method: 'POST',
+      body: formData
+    });
+    
+    const result = await response.json();
+    
+    if (!response.ok) {
+      throw new Error(result.error || 'Import failed');
+    }
+    
+    showAlert('Configuration imported successfully.', 'success');
     await loadSettings();
     await loadResources();
     await loadUsers(userQueryInput.value.trim());

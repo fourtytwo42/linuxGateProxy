@@ -227,11 +227,11 @@
                     <p>Move configuration between environments with a single click.</p>
                   </header>
                   <div class="button-row">
-                    <button class="button is-outline" id="export-settings-button">⬇ Export JSON</button>
-                    <button class="button is-outline" id="import-settings-button">⬆ Import JSON</button>
+                    <button class="button is-outline" id="export-settings-button">⬇ Export ZIP</button>
+                    <button class="button is-outline" id="import-settings-button">⬆ Import ZIP</button>
                   </div>
-                  <p class="help">Passwords and secrets stay encrypted and are not exported. Cloudflared certificate is included if available.</p>
-                  <input type="file" id="import-settings-file" accept=".json" hidden />
+                  <p class="help">Export creates a ZIP file with settings and Cloudflared certificate. Passwords and secrets stay encrypted and are not exported.</p>
+                  <input type="file" id="import-settings-file" accept=".zip" hidden />
                 </div>
               </section>
             </article>

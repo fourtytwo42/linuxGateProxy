@@ -2,6 +2,8 @@ import { Router } from 'express';
 import fs from 'fs';
 import path from 'path';
 import os from 'os';
+import AdmZip from 'adm-zip';
+import multer from 'multer';
 import {
   loadConfig,
   saveConfigSection,
@@ -22,6 +24,20 @@ import { storeSmtpPassword } from '../services/otpService.js';
 import { commandExists } from '../utils/command.js';
 
 const router = Router();
+
+// Configure multer for ZIP file uploads (memory storage)
+const upload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 10 * 1024 * 1024 }, // 10MB limit
+  fileFilter: (req, file, cb) => {
+    // Accept ZIP files
+    if (file.mimetype === 'application/zip' || file.mimetype === 'application/x-zip-compressed' || file.originalname.endsWith('.zip')) {
+      cb(null, true);
+    } else {
+      cb(new Error('Only ZIP files are allowed'));
+    }
+  }
+});
 
 router.get('/api/setup/status', (req, res) => {
   const config = loadConfig();
@@ -48,12 +64,30 @@ router.get('/api/setup/status', (req, res) => {
 });
 
 // Import settings and auto-complete setup if everything is provided
-router.post('/api/setup/import', async (req, res) => {
+router.post('/api/setup/import', upload.single('config'), async (req, res) => {
   try {
-    const importData = req.body;
+    if (!req.file) {
+      return res.status(400).json({ error: 'No file uploaded' });
+    }
     
-    if (!importData || typeof importData !== 'object') {
-      return res.status(400).json({ error: 'Invalid import data' });
+    // Extract ZIP file
+    const zip = new AdmZip(req.file.buffer);
+    const zipEntries = zip.getEntries();
+    
+    // Find settings.json and cloudflared-cert.pem
+    let importData = null;
+    let certContent = null;
+    
+    for (const entry of zipEntries) {
+      if (entry.entryName === 'settings.json') {
+        importData = JSON.parse(entry.getData().toString('utf8'));
+      } else if (entry.entryName === 'cloudflared-cert.pem') {
+        certContent = entry.getData().toString('utf8');
+      }
+    }
+    
+    if (!importData) {
+      return res.status(400).json({ error: 'settings.json not found in ZIP file' });
     }
     
     // Validate that we have required configuration
@@ -91,14 +125,14 @@ router.post('/api/setup/import', async (req, res) => {
       }
     }
     
-    // Import Cloudflared certificate if present
-    if (importData.cloudflaredCert && typeof importData.cloudflaredCert === 'string') {
+    // Import Cloudflared certificate if present in ZIP
+    if (certContent) {
       try {
         const cloudflaredDir = path.dirname(DEFAULT_CERT_PATH);
         if (!fs.existsSync(cloudflaredDir)) {
           fs.mkdirSync(cloudflaredDir, { mode: 0o700, recursive: true });
         }
-        fs.writeFileSync(DEFAULT_CERT_PATH, importData.cloudflaredCert, { mode: 0o600 });
+        fs.writeFileSync(DEFAULT_CERT_PATH, certContent, { mode: 0o600 });
       } catch (error) {
         // Log but don't fail - cert might not be critical if tunnel is already configured
         console.error('Failed to import Cloudflared certificate:', error.message);

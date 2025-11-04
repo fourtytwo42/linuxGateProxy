@@ -1,6 +1,8 @@
 import { Router } from 'express';
 import path from 'path';
 import fs from 'fs';
+import AdmZip from 'adm-zip';
+import multer from 'multer';
 import { loadConfig, saveConfigSection, upsertResource, listResources, deleteResource } from '../config/index.js';
 import { logger } from '../utils/logger.js';
 import {
@@ -23,6 +25,20 @@ import { hasCertificate, listTunnels, getTunnelToken, runTunnel, stopTunnel, isT
 import { getCertificateStatus, requestCertificate } from '../services/certService.js';
 
 const router = Router();
+
+// Configure multer for ZIP file uploads (memory storage)
+const upload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 10 * 1024 * 1024 }, // 10MB limit
+  fileFilter: (req, file, cb) => {
+    // Accept ZIP files
+    if (file.mimetype === 'application/zip' || file.mimetype === 'application/x-zip-compressed' || file.originalname.endsWith('.zip')) {
+      cb(null, true);
+    } else {
+      cb(new Error('Only ZIP files are allowed'));
+    }
+  }
+});
 
 // Helper function to extract user credentials from request for LDAP operations
 function getUserCredentials(req) {
@@ -606,16 +622,6 @@ router.get('/gateProxyAdmin/api/settings/export', requireAdmin, (req, res) => {
     const config = loadConfig();
     const resources = listResources();
     
-    // Include Cloudflared certificate if it exists
-    let cloudflaredCert = null;
-    if (hasCertificate()) {
-      try {
-        cloudflaredCert = fs.readFileSync(DEFAULT_CERT_PATH, 'utf8');
-      } catch (error) {
-        logger.warn('Failed to read Cloudflared certificate for export', { error: error.message });
-      }
-    }
-    
     // Export all settings except secrets (passwords, etc.)
     const exportData = {
       version: '1.0',
@@ -637,24 +643,60 @@ router.get('/gateProxyAdmin/api/settings/export', requireAdmin, (req, res) => {
         // password is stored as secret, don't export
       },
       cloudflare: config.cloudflare,
-      cloudflaredCert: cloudflaredCert, // Include cert if available
       resources: resources
     };
     
-    res.setHeader('Content-Type', 'application/json');
-    res.setHeader('Content-Disposition', 'attachment; filename="gate-proxy-settings.json"');
-    res.json(exportData);
+    // Create ZIP archive
+    const zip = new AdmZip();
+    
+    // Add settings JSON
+    zip.addFile('settings.json', Buffer.from(JSON.stringify(exportData, null, 2), 'utf8'));
+    
+    // Add Cloudflared certificate if it exists
+    if (hasCertificate()) {
+      try {
+        const certContent = fs.readFileSync(DEFAULT_CERT_PATH, 'utf8');
+        zip.addFile('cloudflared-cert.pem', Buffer.from(certContent, 'utf8'));
+      } catch (error) {
+        logger.warn('Failed to read Cloudflared certificate for export', { error: error.message });
+      }
+    }
+    
+    // Generate ZIP buffer
+    const zipBuffer = zip.toBuffer();
+    
+    res.setHeader('Content-Type', 'application/zip');
+    res.setHeader('Content-Disposition', 'attachment; filename="gate-proxy-config.zip"');
+    res.send(zipBuffer);
   } catch (error) {
     res.status(500).json({ error: error.message });
   }
 });
 
-router.post('/gateProxyAdmin/api/settings/import', requireAdmin, (req, res) => {
+router.post('/gateProxyAdmin/api/settings/import', requireAdmin, upload.single('config'), (req, res) => {
   try {
-    const importData = req.body;
+    if (!req.file) {
+      return res.status(400).json({ error: 'No file uploaded' });
+    }
     
-    if (!importData || typeof importData !== 'object') {
-      return res.status(400).json({ error: 'Invalid import data' });
+    // Extract ZIP file
+    const zip = new AdmZip(req.file.buffer);
+    const zipEntries = zip.getEntries();
+    
+    // Find settings.json and cloudflared-cert.pem
+    let importData = null;
+    let certContent = null;
+    
+    for (const entry of zipEntries) {
+      if (entry.entryName === 'settings.json') {
+        importData = JSON.parse(entry.getData().toString('utf8'));
+      } else if (entry.entryName === 'cloudflared-cert.pem') {
+        certContent = entry.getData().toString('utf8');
+      }
+    }
+    
+    if (!importData) {
+      return res.status(400).json({ error: 'settings.json not found in ZIP file' });
     }
     
     // Import each section if it exists
@@ -692,15 +734,15 @@ router.post('/gateProxyAdmin/api/settings/import', requireAdmin, (req, res) => {
       }
     }
     
-    // Import Cloudflared certificate if present
-    if (importData.cloudflaredCert && typeof importData.cloudflaredCert === 'string') {
+    // Import Cloudflared certificate if present in ZIP
+    if (certContent) {
       try {
         const cloudflaredDir = path.dirname(DEFAULT_CERT_PATH);
         if (!fs.existsSync(cloudflaredDir)) {
           fs.mkdirSync(cloudflaredDir, { mode: 0o700, recursive: true });
         }
-        fs.writeFileSync(DEFAULT_CERT_PATH, importData.cloudflaredCert, { mode: 0o600 });
-        logger.info('Cloudflared certificate imported from settings');
+        fs.writeFileSync(DEFAULT_CERT_PATH, certContent, { mode: 0o600 });
+        logger.info('Cloudflared certificate imported from ZIP');
       } catch (error) {
         logger.error('Failed to import Cloudflared certificate', { error: error.message });
         // Don't fail the whole import if cert import fails

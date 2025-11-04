@@ -5,385 +5,319 @@
     <meta http-equiv="X-UA-Compatible" content="IE=edge" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Linux Gate Proxy Setup</title>
-    <link rel="stylesheet" href="/gp-assets/css/bulma.min.css" />
+    <link rel="stylesheet" href="https://unpkg.com/open-props@1.6.14" />
+    <link rel="stylesheet" href="https://unpkg.com/open-props/normalize.min.css" />
+    <link
+      rel="stylesheet"
+      href="https://cdn.jsdelivr.net/npm/@picocss/pico@2/css/pico.min.css"
+      integrity="sha384-z/8ueatf01V4zGEnfe7jyL+9/TQc0tisuxGDdKek7m6eGbQIbEvhCJgYblrBa8Jv"
+      crossorigin="anonymous"
+    />
     <link rel="stylesheet" href="/gp-assets/css/app.css" />
   </head>
-  <body class="has-background-light">
-    <section class="section">
-      <div class="container">
-        <div class="box">
-          <h1 class="title">Linux Gate Proxy Setup</h1>
-          <p class="subtitle">Guided configuration wizard</p>
-                    <div id="setup-progress" class="steps has-content-centered">
-            <div class="step-item is-active" data-step="1">
-              <div class="step-marker">1</div>
-              <div class="step-details">
-                <p class="step-title">Prerequisites</p>
+  <body class="setup-body">
+    <main class="setup-shell">
+      <header class="setup-hero">
+        <div class="hero-badge">GP</div>
+        <div class="hero-copy">
+          <h1>Linux Gate Proxy Setup</h1>
+          <p>We will walk through tiny steps so everything feels easy.</p>
+        </div>
+      </header>
+
+      <div class="progress-strip">
+        <div class="progress-track"><div class="progress-fill" id="step-progress-fill"></div></div>
+        <span class="progress-text" id="step-progress-text">Step 1 of 7</span>
+      </div>
+
+      <section id="alert" class="notification is-hidden"></section>
+
+      <section id="step-contents" class="step-stack">
+        <section id="step-1" class="setup-step is-active" data-step-index="1">
+          <header class="step-header">
+            <span class="step-pill" data-step-label></span>
+            <h2>Pick how you want to start</h2>
+            <p>Already have another Gate Proxy running? Upload its bundle, or keep going to set things up by hand.</p>
+          </header>
+
+          <div class="card-grid">
+            <article class="wizard-card highlight">
+              <h3>Use a bundle</h3>
+              <p>Choose the ZIP we exported earlier. We copy every setting along with your Cloudflare login ticket.</p>
+              <div class="card-actions">
+                <button class="primary" type="button" id="setup-import-button">Upload configuration ZIP</button>
+                <input type="file" id="setup-import-file" accept=".zip" hidden />
               </div>
-            </div>
-            <div class="step-item" data-step="2">
-              <div class="step-marker">2</div>
-              <div class="step-details">
-                <p class="step-title">Active Directory</p>
+              <p class="muted small">We look for <code>gate-proxy-config.zip</code>.</p>
+            </article>
+
+            <article class="wizard-card">
+              <h3>Set up by hand</h3>
+              <p>We just need Cloudflared installed on this server. It lets Gate Proxy talk to Cloudflare.</p>
+              <div class="status-card" id="prereq-cloudflared" data-state="checking">
+                <span class="status-dot" aria-hidden="true"></span>
+                <div>
+                  <p class="status-title">Cloudflared</p>
+                  <p class="prereq-status-text">Checking…</p>
+                </div>
               </div>
-            </div>
-            <div class="step-item" data-step="3">
-              <div class="step-marker">3</div>
-              <div class="step-details">
-                <p class="step-title">Site</p>
+              <p class="muted">If we can't find it, run this command:</p>
+              <pre class="code-block"><code id="prereq-script">bash scripts/install-prereqs.sh</code></pre>
+              <div class="card-actions">
+                <button class="ghost" type="button" id="prereq-refresh">Check again</button>
+                <button class="primary" type="button" id="prereq-continue">Looks good</button>
               </div>
-            </div>
-            <div class="step-item" data-step="4">
-              <div class="step-marker">4</div>
-              <div class="step-details">
-                <p class="step-title">Setup Scripts</p>
+            </article>
+          </div>
+        </section>
+
+        <form id="step-2" class="setup-step" data-step-index="2">
+          <header class="step-header">
+            <span class="step-pill" data-step-label></span>
+            <h2>Tell us about your domain</h2>
+            <p>These clues help Gate Proxy find your directory.</p>
+          </header>
+
+          <div class="step-body two-column">
+            <fieldset>
+              <legend>Domain basics</legend>
+              <label>
+                <span>Domain name</span>
+                <input name="domain" required placeholder="example.corp" />
+              </label>
+              <label>
+                <span>LDAP host</span>
+                <input name="ldapHost" required placeholder="dc01.example.corp" />
+              </label>
+              <label>
+                <span>Base DN</span>
+                <input name="baseDn" required placeholder="DC=example,DC=corp" />
+              </label>
+              <label>
+                <span>LDAP port</span>
+                <input name="ldapPort" type="number" value="636" />
+              </label>
+              <label class="checkbox-row">
+                <input type="checkbox" name="useLdaps" checked />
+                <span>Use secure LDAPS (recommended)</span>
+              </label>
+            </fieldset>
+
+            <fieldset>
+              <legend>Service account</legend>
+              <label>
+                <span>Account sign-in (UPN)</span>
+                <input name="lookupUser" required placeholder="gateproxy@example.corp" />
+              </label>
+              <label>
+                <span>Password</span>
+                <input name="password" type="password" required />
+              </label>
+              <label>
+                <span>Session attribute name</span>
+                <input name="sessionAttribute" value="gateProxySession" />
+              </label>
+              <label>
+                <span>WebAuthn attribute name</span>
+                <input name="webAuthnAttribute" value="gateProxyWebAuthn" />
+              </label>
+              <div class="info-card">
+                <p class="info-title">Who can manage Gate Proxy?</p>
+                <p>We automatically allow the <strong>Domain Admins</strong> group. You can add more later in the admin page.</p>
               </div>
-            </div>
-            <div class="step-item" data-step="5">
-              <div class="step-marker">5</div>
-              <div class="step-details">
-                <p class="step-title">Cloudflare</p>
-              </div>
-            </div>
-            <div class="step-item" data-step="6">
-              <div class="step-marker">6</div>
-              <div class="step-details">
-                <p class="step-title">Resources</p>
-              </div>
-            </div>
-            <div class="step-item" data-step="7">
-              <div class="step-marker">7</div>
-              <div class="step-details">
-                <p class="step-title">Finish</p>
-              </div>
-            </div>
+            </fieldset>
           </div>
 
-          <div id="alert" class="notification is-hidden"></div>
+          <footer class="step-footer">
+            <span></span>
+            <button class="primary" type="submit">Test connection</button>
+          </footer>
+        </form>
 
-          <div id="step-contents">
-            <div id="step-1" class="setup-step is-active">
-              <h2 class="title is-4">Quick Setup</h2>
-              <div class="notification is-info">
-                <p class="mb-3"><strong>Have a settings file from another node?</strong></p>
-                <p class="mb-3">Import your configuration file to automatically set up this node with all settings, including Cloudflared certificate.</p>
-                <div class="buttons">
-                  <button class="button is-link" type="button" id="setup-import-button">⬆ Import Configuration</button>
-                  <input type="file" id="setup-import-file" accept=".json" hidden />
-                </div>
-              </div>
-              <hr />
-              <h2 class="title is-5 mt-4">Manual Setup</h2>
-              <p>Before continuing, ensure the host has Cloudflare Tunnel binary installed.</p>
-              <div class="columns mt-3">
-                <div class="column">
-                  <article class="message" id="prereq-cloudflared">
-                    <div class="message-header">
-                      <p>Cloudflared</p>
-                    </div>
-                    <div class="message-body">
-                      <p class="prereq-status-text">Checking...</p>
-                      <p class="is-size-7">Used for device-login to Cloudflare.</p>
-                    </div>
-                  </article>
-                </div>
-              </div>
-              <div class="content">
-                <p>Run the helper script to install prerequisites:</p>
-                <pre><code id="prereq-script">bash scripts/install-prereqs.sh</code></pre>
-              </div>
-              <div class="buttons">
-                <button class="button" id="prereq-refresh" type="button">Re-check</button>
-                <button class="button is-link" id="prereq-continue" type="button">Continue</button>
-              </div>
-            </div>
-            <form id="step-2" class="setup-step">
-              <h2 class="title is-4">Active Directory Connection</h2>
-              <div class="columns">
-                <div class="column">
-                  <div class="field">
-                    <label class="label">Domain FQDN</label>
-                    <div class="control has-icons-left">
-                      <input class="input" name="domain" required placeholder="example.corp" />
-                      <span class="icon is-small is-left">
-                        <i class="fas fa-globe"></i>
-                      </span>
-                    </div>
-                  </div>
-                  <div class="field">
-                    <label class="label">LDAP Host</label>
-                    <input class="input" name="ldapHost" required placeholder="dc01.example.corp" />
-                  </div>
-                  <div class="field">
-                    <label class="label">Base DN</label>
-                    <input class="input" name="baseDn" required placeholder="DC=example,DC=corp" />
-                  </div>
-                  <div class="field">
-                    <label class="label">Service Account (UPN)</label>
-                    <input class="input" name="lookupUser" required placeholder="gateproxy@example.corp" />
-                  </div>
-                  <div class="field">
-                    <label class="label">Service Account Password</label>
-                    <input class="input" name="password" type="password" required />
-                  </div>
-                </div>
-                <div class="column">
-                  <div class="field">
-                    <label class="label">LDAP Port</label>
-                    <input class="input" name="ldapPort" type="number" value="636" />
-                  </div>
-                  <div class="field">
-                    <label class="checkbox">
-                      <input type="checkbox" name="useLdaps" checked />
-                      Use LDAPS (recommended)
-                    </label>
-                  </div>
-                  <div class="field">
-                    <label class="label">Session Attribute</label>
-                    <input class="input" name="sessionAttribute" value="gateProxySession" />
-                  </div>
-                  <div class="field">
-                    <label class="label">WebAuthn Attribute</label>
-                    <input class="input" name="webAuthnAttribute" value="gateProxyWebAuthn" />
-                  </div>
+        <form id="step-3" class="setup-step" data-step-index="3">
+          <header class="step-header">
+            <span class="step-pill" data-step-label></span>
+            <h2>Pick how the portal behaves</h2>
+            <p>These settings control how teammates reach Gate Proxy.</p>
+          </header>
 
-                  <div class="field">
-                    <label class="label">Admin Access</label>
-                    <article class="message is-info">
-                      <div class="message-body">
-                        <p><strong>Domain Admins have admin access by default.</strong></p>
-                        <p class="is-size-7 mt-2">You can configure additional admin groups after setup is complete in the admin portal.</p>
-                      </div>
-                    </article>
-                  </div>
-                </div>
-              </div>
-              <div class="field is-grouped is-justify-content-flex-end">
-                <div class="control">
-                  <button class="button is-link" type="submit">Test &amp; Continue</button>
-                </div>
-              </div>
-            </form>
-            <form id="step-3" class="setup-step">
-              <h2 class="title is-4">Site Configuration</h2>
-              <div class="columns">
-                <div class="column">
-                  <div class="field">
-                    <label class="label">Listen Address</label>
-                    <input class="input" name="listenAddress" value="127.0.0.1" />
-                  </div>
-                  <div class="field">
-                    <label class="label">Listen Port</label>
-                    <input class="input" name="listenPort" type="number" value="5000" />
-                  </div>
-                  <div class="field">
-                    <label class="label">Public Base URL</label>
-                    <input class="input" name="publicBaseUrl" placeholder="https://portal.example.com" />
-                  </div>
-                  <div class="field">
-                    <label class="label">Session Duration (hours)</label>
-                    <input class="input" name="sessionHours" type="number" value="8" />
-                  </div>
-                </div>
-                <div class="column">
-                  <div class="field">
-                    <label class="checkbox">
-                      <input type="checkbox" name="enableOtp" checked />
-                      Enable OTP fallback
-                    </label>
-                  </div>
-                  <div class="field">
-                    <label class="checkbox">
-                      <input type="checkbox" name="enableWebAuthn" checked />
-                      Enforce WebAuthn second factor
-                    </label>
-                  </div>
-                  <div class="box has-background-light">
-                    <p class="has-text-weight-semibold">SMTP Settings</p>
-                    <div class="field">
-                      <label class="label">SMTP Host</label>
-                      <input class="input" name="smtpHost" />
-                    </div>
-                    <div class="field">
-                      <label class="label">SMTP Port</label>
-                      <input class="input" name="smtpPort" type="number" value="587" />
-                    </div>
-                    <div class="field">
-                      <label class="checkbox">
-                        <input type="checkbox" name="smtpSecure" />
-                        Use TLS
-                      </label>
-                    </div>
-                    <div class="field">
-                      <label class="label">SMTP Username</label>
-                      <input class="input" name="smtpUsername" />
-                    </div>
-                    <div class="field">
-                      <label class="label">SMTP Password</label>
-                      <input class="input" name="smtpPassword" type="password" />
-                    </div>
-                    <div class="field">
-                      <label class="label">From Address</label>
-                      <input class="input" name="smtpFrom" />
-                    </div>
-                    <div class="field">
-                      <label class="label">Reply-To (optional)</label>
-                      <input class="input" name="smtpReplyTo" />
-                    </div>
-                  </div>
-                </div>
-              </div>
-              <div class="field is-grouped">
-                <div class="control">
-                  <button class="button" data-action="prev">Back</button>
-                </div>
-                <div class="control">
-                  <button class="button is-link" type="submit">Save &amp; Continue</button>
-                </div>
-              </div>
-            </form>
-            <div id="step-4" class="setup-step">
-              <h2 class="title is-4">Setup Scripts</h2>
-              <p class="mb-4">Download and run these helper scripts on your domain controller and certificate server to complete the integration.</p>
-              
-              <div class="columns mt-5">
-                <div class="column">
-                  <div class="box">
-                    <h3 class="title is-5 mb-4">1. Domain Controller Setup</h3>
-                    <p class="mb-4">Extends the Active Directory schema with Gate Proxy attributes for session storage and WebAuthn credentials. Run on the Schema Master while signed in as a Schema Admin.</p>
-                    
-                    <div class="field">
-                      <label class="label">Download Package:</label>
-                      <div class="buttons">
-                        <a href="/share/configure-domain-controller.zip" class="button is-link is-outlined" download>
-                          <span class="icon"><i class="fas fa-download"></i></span>
-                          <span>configure-domain-controller.zip</span>
-                        </a>
-                      </div>
-                      <p class="help">ZIP contains both <code>.bat</code> (auto-elevating) and <code>.ps1</code> scripts.</p>
-                    </div>
+          <div class="step-body two-column">
+            <fieldset>
+              <legend>Server basics</legend>
+              <label>
+                <span>Listen address</span>
+                <input name="listenAddress" value="127.0.0.1" />
+              </label>
+              <label>
+                <span>Listen port</span>
+                <input name="listenPort" type="number" value="5000" />
+              </label>
+              <label>
+                <span>Public base URL</span>
+                <input name="publicBaseUrl" placeholder="https://portal.example.com" />
+              </label>
+              <label>
+                <span>Session time (hours)</span>
+                <input name="sessionHours" type="number" value="8" />
+              </label>
+              <label class="checkbox-row">
+                <input type="checkbox" name="enableOtp" checked />
+                <span>Allow email backup codes</span>
+              </label>
+              <label class="checkbox-row">
+                <input type="checkbox" name="enableWebAuthn" checked />
+                <span>Ask for security keys on login</span>
+              </label>
+            </fieldset>
 
-                    <div class="message is-info mt-4">
-                      <div class="message-body">
-                        <p class="has-text-weight-semibold mb-2">How to Run:</p>
-                        <ol class="ml-4" style="list-style-type: decimal;">
-                          <li class="mb-2">Download <code>configure-domain-controller.zip</code> to the Schema Master domain controller</li>
-                          <li class="mb-2">Extract the ZIP contents</li>
-                          <li class="mb-2">Right-click <code>configure-domain-controller.bat</code> &gt; Run as Administrator (or run the PowerShell script manually)</li>
-                          <li class="mb-2">Ensure you are logged in with Schema Admin rights; the script uses the current credentials</li>
-                          <li>Allow the script to complete the schema update. No additional input is required.</li>
-                        </ol>
-                        <p class="mt-3"><strong>Note:</strong> The batch file auto-elevates and simply calls the PowerShell script. Keep the extracted folder for future reruns.</p>
-                      </div>
-                    </div>
-                  </div>
-                </div>
-
-                <div class="column">
-                  <div class="box">
-                    <h3 class="title is-5 mb-4">2. Certificate Server Setup</h3>
-                    <p class="mb-4">Prepares Active Directory Certificate Services (AD CS) to issue SSL certificates for Gate Proxy. Installs required roles/features and configures the CA for enrollment.</p>
-                    
-                    <div class="field">
-                      <label class="label">Download Package:</label>
-                      <div class="buttons">
-                        <a href="/share/configure-certificate-server.zip" class="button is-link is-outlined" download>
-                          <span class="icon"><i class="fas fa-download"></i></span>
-                          <span>configure-certificate-server.zip</span>
-                        </a>
-                      </div>
-                      <p class="help">ZIP contains both <code>.bat</code> (auto-elevating) and <code>.ps1</code> scripts.</p>
-                    </div>
-
-                    <div class="message is-info mt-4">
-                      <div class="message-body">
-                        <p class="has-text-weight-semibold mb-2">How to Run:</p>
-                        <ol class="ml-4" style="list-style-type: decimal;">
-                          <li class="mb-2">Download <code>configure-certificate-server.zip</code> to the server hosting AD CS</li>
-                          <li class="mb-2">Extract the ZIP contents</li>
-                          <li class="mb-2">Right-click <code>configure-certificate-server.bat</code> &gt; Run as Administrator (or execute the PowerShell script)</li>
-                          <li class="mb-2">Follow the guided prompts to install AD CS components if needed and configure the enterprise CA</li>
-                          <li>After completion, Gate Proxy can automatically request certificates from this CA.</li>
-                        </ol>
-                        <p class="mt-3"><strong>Note:</strong> Run as a user with Enterprise Admin / CA Admin permissions. The batch file will request elevation automatically.</p>
-                      </div>
-                    </div>
-                  </div>
-                </div>
-              </div>
-
-              <article class="message is-warning mt-5">
-                <div class="message-header">
-                  <p>Important Notes</p>
-                </div>
-                <div class="message-body">
-                  <ul class="ml-4">
-                    <li>Replace <code>localhost</code> in URLs above with your server's IP address when accessing from other machines</li>
-                    <li>Both scripts require Active Directory and appropriate server roles to be installed</li>
-                    <li>Ensure your account has the necessary permissions (Domain Admin for DC, CA Admin for Certificate Server)</li>
-                    <li>The scripts will prompt for required information during execution</li>
-                  </ul>
-                </div>
-              </article>
-
-              <div class="field is-grouped mt-5">
-                <div class="control">
-                  <button class="button" data-action="prev">Back</button>
-                </div>
-                <div class="control">
-                  <button class="button is-link" data-action="next">Continue</button>
-                </div>
-              </div>
-            </div>
-            <div id="step-5" class="setup-step">
-              <h2 class="title is-4">Cloudflare Authentication</h2>
-              <p>Authenticate with Cloudflare to authorize this application to manage tunnels on your account.</p>
-              <div class="notification is-info is-light">
-                <strong>Note:</strong> When you click the login link, Cloudflare will ask you to select a zone for authorization. This is just for OAuth authorization purposes - it does <strong>not</strong> create a tunnel or affect your existing tunnels. You can select any zone you manage. After authentication, you'll be able to reuse existing tunnels or create new ones.
-              </div>
-              <div id="cloudflare-login" class="box">
-                <button class="button is-link" id="cloudflare-start">Generate Login Link</button>
-                <div id="cloudflare-status" class="mt-4"></div>
-              </div>
-              <div class="field is-grouped">
-                <div class="control">
-                  <button class="button" data-action="prev">Back</button>
-                </div>
-                <div class="control">
-                  <button class="button is-link" id="cloudflare-next">Continue</button>
-                </div>
-              </div>
-            </div>
-            <form id="step-6" class="setup-step">
-              <h2 class="title is-4">Protected Resources</h2>
-              <p>Add internal services that should be exposed after authentication. Configure at least one destination.</p>
-              <div class="field">
-                <label class="label">Primary Target URL</label>
-                <input class="input" name="targetHost" placeholder="http://127.0.0.1:5600" required />
-              </div>
-              <div id="resource-list"></div>
-              <div class="buttons mt-3">
-                <button class="button is-small" type="button" id="add-resource">Add Resource</button>
-              </div>
-              <div class="field is-grouped">
-                <div class="control">
-                  <button class="button" data-action="prev">Back</button>
-                </div>
-                <div class="control">
-                  <button class="button is-link" type="submit">Save Resources</button>
-                </div>
-              </div>
-            </form>
-            <div id="step-7" class="setup-step">
-              <h2 class="title is-4">Setup Complete</h2>
-              <p>Review the summary and launch the appliance.</p>
-              <div id="summary"></div>
-              <div class="buttons is-right mt-4">
-                <button class="button is-success" id="finish-setup">Complete Setup</button>
-              </div>
-            </div>
+            <fieldset>
+              <legend>Email helper (optional)</legend>
+              <label>
+                <span>SMTP host</span>
+                <input name="smtpHost" />
+              </label>
+              <label>
+                <span>SMTP port</span>
+                <input name="smtpPort" type="number" value="587" />
+              </label>
+              <label class="checkbox-row">
+                <input type="checkbox" name="smtpSecure" />
+                <span>Use TLS</span>
+              </label>
+              <label>
+                <span>SMTP username</span>
+                <input name="smtpUsername" />
+              </label>
+              <label>
+                <span>SMTP password</span>
+                <input name="smtpPassword" type="password" />
+              </label>
+              <label>
+                <span>From address</span>
+                <input name="smtpFrom" placeholder="gateproxy@example.corp" />
+              </label>
+              <label>
+                <span>Reply-To (optional)</span>
+                <input name="smtpReplyTo" placeholder="helpdesk@example.corp" />
+              </label>
+            </fieldset>
           </div>
-<script src="https://kit.fontawesome.com/a2e0e9b1ef.js" crossorigin="anonymous"></script>
+
+          <footer class="step-footer">
+            <button class="ghost" type="button" data-action="prev">Back</button>
+            <button class="primary" type="submit">Save &amp; continue</button>
+          </footer>
+        </form>
+
+        <section id="step-4" class="setup-step" data-step-index="4">
+          <header class="step-header">
+            <span class="step-pill" data-step-label></span>
+            <h2>Run the helper scripts</h2>
+            <p>These bundles finish the work inside your domain.</p>
+          </header>
+
+          <div class="card-grid">
+            <article class="wizard-card">
+              <h3>Domain controller</h3>
+              <p>Run on the Schema Master while signed in as a Schema Admin.</p>
+              <a class="outline" href="/share/configure-domain-controller.zip" download>Download configure-domain-controller.zip</a>
+              <ol class="guide-list">
+                <li>Download and unzip the folder.</li>
+                <li>Right-click <code>configure-domain-controller.bat</code> and choose “Run as administrator”.</li>
+                <li>Wait for the window to finish. No extra input is needed.</li>
+              </ol>
+              <p class="muted small">All scripts are inside the ZIP along with auto-elevating BAT files.</p>
+            </article>
+
+            <article class="wizard-card">
+              <h3>Certificate server</h3>
+              <p>Run on the Windows Server that hosts Active Directory Certificate Services.</p>
+              <a class="outline" href="/share/configure-certificate-server.zip" download>Download configure-certificate-server.zip</a>
+              <ol class="guide-list">
+                <li>Download and unzip the folder on the CA server.</li>
+                <li>Run <code>configure-certificate-server.bat</code> as administrator.</li>
+                <li>Let the script install any missing tools and prep the CA.</li>
+              </ol>
+              <p class="muted small">Use an account with Enterprise Admin or CA Admin rights.</p>
+            </article>
+          </div>
+
+          <div class="note-card">
+            <h3>Helpful reminders</h3>
+            <ul>
+              <li>Every ZIP packs both PowerShell and BAT launchers.</li>
+              <li>Keep the extracted folders so you can rerun the scripts later.</li>
+              <li>If accessing from another PC, swap <code>localhost</code> with this server’s IP.</li>
+            </ul>
+          </div>
+
+          <footer class="step-footer">
+            <button class="ghost" type="button" data-action="prev">Back</button>
+            <button class="primary" type="button" data-action="next">Continue</button>
+          </footer>
+        </section>
+
+        <section id="step-5" class="setup-step" data-step-index="5">
+          <header class="step-header">
+            <span class="step-pill" data-step-label></span>
+            <h2>Sign in to Cloudflare</h2>
+            <p>We only need to confirm this server is allowed to reuse your tunnel.</p>
+          </header>
+
+          <div class="wizard-card">
+            <p>Click the button to get a one-time login link. Cloudflare will ask you to pick any zone you manage. That pick does not change your tunnels.</p>
+            <div class="card-actions">
+              <button class="primary" id="cloudflare-start">Get login link</button>
+            </div>
+            <div id="cloudflare-status" class="cloudflare-status"></div>
+          </div>
+
+          <footer class="step-footer">
+            <button class="ghost" type="button" data-action="prev">Back</button>
+            <button class="primary" type="button" id="cloudflare-next">Continue</button>
+          </footer>
+        </section>
+
+        <form id="step-6" class="setup-step" data-step-index="6">
+          <header class="step-header">
+            <span class="step-pill" data-step-label></span>
+            <h2>Add the apps you want to protect</h2>
+            <p>We start with one main target, then you can add more cards.</p>
+          </header>
+
+          <div class="step-body">
+            <label>
+              <span>Main target URL</span>
+              <input name="targetHost" placeholder="http://127.0.0.1:5600" required />
+            </label>
+
+            <div id="resource-list" class="resource-stack"></div>
+
+            <button class="outline" type="button" id="add-resource">Add another app</button>
+          </div>
+
+          <footer class="step-footer">
+            <button class="ghost" type="button" data-action="prev">Back</button>
+            <button class="primary" type="submit">Save resources</button>
+          </footer>
+        </form>
+
+        <section id="step-7" class="setup-step" data-step-index="7">
+          <header class="step-header">
+            <span class="step-pill" data-step-label></span>
+            <h2>All set!</h2>
+            <p>Look over the summary, then launch Gate Proxy.</p>
+          </header>
+
+          <div id="summary" class="summary-grid"></div>
+
+          <footer class="step-footer">
+            <button class="primary" id="finish-setup">Complete setup</button>
+          </footer>
+        </section>
+      </section>
+    </main>
+
     <script type="module" src="/gp-assets/js/setup.js"></script>
   </body>
 </html>

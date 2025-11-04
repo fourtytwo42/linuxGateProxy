@@ -14,6 +14,7 @@
   "license": "ISC",
   "dependencies": {
     "@simplewebauthn/server": "^13.2.2",
+    "adm-zip": "^0.5.16",
     "better-sqlite3": "^12.4.1",
     "cookie-parser": "^1.4.7",
     "csurf": "^1.11.0",
@@ -23,6 +24,7 @@
     "http-proxy": "^1.18.1",
     "kerberos": "^2.0.1",
     "ldapts": "^8.0.9",
+    "multer": "^2.0.2",
     "nodemailer": "^7.0.10"
   },
   "devDependencies": {
