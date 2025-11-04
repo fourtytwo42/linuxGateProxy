@@ -1,48 +1,48 @@
 @echo off
-:: Batch wrapper for configure-domain-controller.ps1
-:: This script automatically requests administrator privileges and runs the PowerShell script
+:: configure-domain-controller.bat
+:: Wrapper script that calls the PowerShell schema update script
+:: This batch file automatically requests administrator privileges
+::
+:: IMPORTANT: The logged-in user must be a member of the Schema Admins group.
 
-setlocal
-set "SCRIPT_DIR=%~dp0"
-cd /d "%SCRIPT_DIR%"
-
-:: Check for administrator privileges
+:: Check for admin privileges
 net session >nul 2>&1
-if %errorLevel% == 0 (
-    echo Running with administrator privileges...
-    goto :run_script
+if %errorLevel% neq 0 (
+    echo Requesting administrator privileges...
+    powershell -Command "Start-Process -FilePath '%~f0' -Verb RunAs"
+    exit /b
 )
 
-:: Request elevation
-echo Requesting administrator privileges...
-powershell.exe -Command "Start-Process '%~f0' -Verb RunAs"
-exit /b
+echo ================================================================
+echo Linux Gate Proxy - Active Directory Schema Configuration
+echo ================================================================
+echo.
+echo IMPORTANT: This script requires:
+echo   1. Administrator privileges (this script will request them)
+echo   2. Schema Admin group membership for the logged-in user
+echo   3. Must be run on the Schema Master Domain Controller
+echo.
+echo The script will use the credentials of the currently logged-in user.
+echo No passwords or additional configuration are required.
+echo.
+echo Press any key to continue or Ctrl+C to cancel...
+pause >nul
 
-:run_script
-:: Run the PowerShell script with bypass execution policy
-set "PS_SCRIPT=%SCRIPT_DIR%configure-domain-controller.ps1"
-
-echo.
-echo ========================================
-echo  Gate Proxy - Domain Controller Setup
-echo ========================================
-echo.
-echo This script will configure your domain controller for Linux Gate Proxy integration.
-echo.
-echo You will need:
-echo   - Tunnel hostname (e.g., tunnel.yourdomain.com)
-echo   - Gate Proxy host IP address
-echo.
-
-powershell.exe -NoLogo -NoProfile -ExecutionPolicy Bypass -File "%PS_SCRIPT%"
+powershell -ExecutionPolicy Bypass -File "%~dp0configure-domain-controller.ps1"
 
 if %errorLevel% neq 0 (
     echo.
-    echo ERROR: Script execution failed with error code %errorLevel%
+    echo Error: Schema update failed.
+    echo.
+    echo Please verify:
+    echo   - You are logged in as a Schema Admin
+    echo   - You are running this on the Schema Master DC
+    echo   - You logged off and on after being added to Schema Admins
+    echo.
     pause
     exit /b %errorLevel%
 )
 
 echo.
-echo Script completed successfully.
+echo Configuration complete!
 pause
