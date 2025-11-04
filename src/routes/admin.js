@@ -17,6 +17,7 @@ import {
 import { requireAdmin } from '../middleware/auth.js';
 import { publicDir } from '../utils/paths.js';
 import { storeSmtpPassword } from '../services/otpService.js';
+import { hasCertificate, listTunnels, getTunnelToken } from '../services/cloudflareService.js';
 
 const router = Router();
 
@@ -44,7 +45,8 @@ router.get('/gateProxyAdmin/api/settings', requireAdmin, (req, res) => {
     smtp: config.smtp,
     cloudflare: {
       tunnelName: config.cloudflare.tunnelName,
-      credentialFile: config.cloudflare.credentialFile
+      credentialFile: config.cloudflare.credentialFile,
+      isLinked: hasCertificate()
     }
   });
 });
@@ -280,6 +282,134 @@ router.post('/gateProxyAdmin/api/users/:sam/reset-webauthn', requireAdmin, async
     res.json({ success: true });
   } catch (error) {
     next(error);
+  }
+});
+
+// Cloudflare tunnel management
+router.get('/gateProxyAdmin/api/cloudflare/tunnels', requireAdmin, async (req, res, next) => {
+  try {
+    if (!hasCertificate()) {
+      return res.status(400).json({ error: 'Cloudflare certificate not found. Please login first.' });
+    }
+    const tunnels = await listTunnels();
+    res.json({ tunnels });
+  } catch (error) {
+    next(error);
+  }
+});
+
+router.post('/gateProxyAdmin/api/cloudflare/connect', requireAdmin, async (req, res, next) => {
+  try {
+    const { tunnelName } = req.body;
+    if (!tunnelName) {
+      return res.status(400).json({ error: 'Tunnel name or UUID is required.' });
+    }
+    if (!hasCertificate()) {
+      return res.status(400).json({ error: 'Cloudflare certificate not found. Please login first.' });
+    }
+    const token = await getTunnelToken(tunnelName);
+    
+    // Save tunnel configuration
+    const config = loadConfig();
+    saveConfigSection('cloudflare', {
+      ...config.cloudflare,
+      tunnelName: tunnelName,
+      credentialFile: token.credentialFile || '',
+      accountTag: token.AccountTag || '',
+      certPem: token.certPem || ''
+    });
+
+    res.json({ success: true, tunnel: { name: tunnelName, ...token } });
+  } catch (error) {
+    next(error);
+  }
+});
+
+// Settings export/import
+router.get('/gateProxyAdmin/api/settings/export', requireAdmin, (req, res) => {
+  try {
+    const config = loadConfig();
+    const resources = listResources();
+    
+    // Export all settings except secrets (passwords, etc.)
+    const exportData = {
+      version: '1.0',
+      exportedAt: new Date().toISOString(),
+      site: config.site,
+      auth: {
+        ...config.auth,
+        // Don't export passwords - they're stored as secrets
+      },
+      proxy: config.proxy,
+      samba: config.samba,
+      smtp: {
+        // Don't export SMTP password
+        host: config.smtp.host,
+        port: config.smtp.port,
+        secure: config.smtp.secure,
+        from: config.smtp.from,
+        // password is stored as secret, don't export
+      },
+      cloudflare: config.cloudflare,
+      resources: resources
+    };
+    
+    res.setHeader('Content-Type', 'application/json');
+    res.setHeader('Content-Disposition', 'attachment; filename="gate-proxy-settings.json"');
+    res.json(exportData);
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+router.post('/gateProxyAdmin/api/settings/import', requireAdmin, (req, res) => {
+  try {
+    const importData = req.body;
+    
+    if (!importData || typeof importData !== 'object') {
+      return res.status(400).json({ error: 'Invalid import data' });
+    }
+    
+    // Import each section if it exists
+    if (importData.site) {
+      saveConfigSection('site', importData.site);
+    }
+    if (importData.auth) {
+      // Don't import passwords - they should remain as secrets
+      const currentAuth = loadConfig().auth;
+      saveConfigSection('auth', {
+        ...importData.auth,
+        // Keep existing passwords/secrets
+        // Don't overwrite bind password, session/webAuthn attributes are in AD
+      });
+    }
+    if (importData.proxy) {
+      saveConfigSection('proxy', importData.proxy);
+    }
+    if (importData.samba) {
+      saveConfigSection('samba', importData.samba);
+    }
+    if (importData.smtp) {
+      // Don't import SMTP password - keep existing
+      const currentSmtp = loadConfig().smtp;
+      saveConfigSection('smtp', {
+        ...importData.smtp,
+        // password stays as secret, don't overwrite
+      });
+    }
+    if (importData.cloudflare) {
+      saveConfigSection('cloudflare', importData.cloudflare);
+    }
+    if (importData.resources && Array.isArray(importData.resources)) {
+      // Import resources
+      for (const resource of importData.resources) {
+        upsertResource(resource);
+      }
+    }
+    
+    res.json({ success: true });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
   }
 });
 

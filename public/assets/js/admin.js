@@ -91,6 +91,9 @@ async function deleteResource(id) {
 
 function renderStatusCards() {
   statusCards.innerHTML = '';
+  const tunnelStatus = settings.cloudflare?.isLinked 
+    ? (settings.cloudflare.tunnelName ? `Linked (${settings.cloudflare.tunnelName})` : 'Linked')
+    : 'Unlinked';
   const cards = [
     {
       title: 'Public URL',
@@ -98,7 +101,7 @@ function renderStatusCards() {
     },
     {
       title: 'Cloudflare Tunnel',
-      value: settings.cloudflare.credentialFile ? 'Linked' : 'Unlinked'
+      value: tunnelStatus
     },
     {
       title: 'Resources',
@@ -774,6 +777,137 @@ async function loadGroupsFromSettings() {
   }
 }
 
+// Export/Import settings
+const exportSettingsButton = document.getElementById('export-settings-button');
+const importSettingsButton = document.getElementById('import-settings-button');
+const importSettingsFile = document.getElementById('import-settings-file');
+
+exportSettingsButton.addEventListener('click', async () => {
+  try {
+    const response = await fetch('/gateProxyAdmin/api/settings/export');
+    if (!response.ok) {
+      throw new Error('Failed to export settings');
+    }
+    const blob = await response.blob();
+    const url = window.URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = 'gate-proxy-settings.json';
+    document.body.appendChild(a);
+    a.click();
+    window.URL.revokeObjectURL(url);
+    document.body.removeChild(a);
+    showAlert('Settings exported successfully.', 'is-success');
+  } catch (error) {
+    showAlert(error.message || 'Failed to export settings', 'is-danger');
+  }
+});
+
+importSettingsButton.addEventListener('click', () => {
+  importSettingsFile.click();
+});
+
+importSettingsFile.addEventListener('change', async (event) => {
+  const file = event.target.files[0];
+  if (!file) return;
+  
+  try {
+    const text = await file.text();
+    const importData = JSON.parse(text);
+    
+    if (!confirm('Are you sure you want to import these settings? This will overwrite your current configuration (passwords will not be changed).')) {
+      return;
+    }
+    
+    const response = await fetch('/gateProxyAdmin/api/settings/import', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(importData)
+    });
+    
+    if (!response.ok) {
+      const error = await response.json();
+      throw new Error(error.error || 'Failed to import settings');
+    }
+    
+    showAlert('Settings imported successfully. Reloading...', 'is-success');
+    // Reload settings
+    setTimeout(() => {
+      bootstrap();
+    }, 1000);
+  } catch (error) {
+    showAlert(error.message || 'Failed to import settings', 'is-danger');
+  } finally {
+    // Reset file input
+    importSettingsFile.value = '';
+  }
+});
+
+// Cloudflare tunnel management
+const connectTunnelButton = document.getElementById('connect-tunnel-button');
+const tunnelStatusSpan = document.getElementById('tunnel-status');
+
+async function updateTunnelStatus() {
+  try {
+    const tunnelSettings = await getJson('/gateProxyAdmin/api/settings');
+    const isLinked = tunnelSettings.cloudflare?.isLinked || false;
+    const tunnelName = tunnelSettings.cloudflare?.tunnelName;
+    
+    if (isLinked) {
+      tunnelStatusSpan.textContent = tunnelName ? `Linked (${tunnelName})` : 'Linked';
+      tunnelStatusSpan.className = 'has-text-success';
+    } else {
+      tunnelStatusSpan.textContent = 'Unlinked';
+      tunnelStatusSpan.className = 'has-text-danger';
+    }
+  } catch (error) {
+    tunnelStatusSpan.textContent = 'Error checking status';
+    tunnelStatusSpan.className = 'has-text-danger';
+  }
+}
+
+connectTunnelButton.addEventListener('click', async () => {
+  try {
+    // List available tunnels
+    const tunnelsResponse = await getJson('/gateProxyAdmin/api/cloudflare/tunnels');
+    const tunnels = tunnelsResponse.tunnels || [];
+    
+    if (tunnels.length === 0) {
+      showAlert('No tunnels found. Please create a tunnel first in Cloudflare dashboard or run cloudflared tunnel create.', 'is-warning');
+      return;
+    }
+    
+    // Show tunnel selection dialog
+    const tunnelNames = tunnels.map(t => t.name || t.id).filter(Boolean);
+    if (tunnelNames.length === 0) {
+      showAlert('No tunnel names found.', 'is-warning');
+      return;
+    }
+    
+    // Create a simple selection prompt
+    const selectedName = tunnelNames.length === 1 
+      ? tunnelNames[0]
+      : prompt(`Select a tunnel:\n${tunnelNames.map((n, i) => `${i + 1}. ${n}`).join('\n')}\n\nEnter tunnel name or number:`, tunnelNames[0]);
+    
+    if (!selectedName) return;
+    
+    // Handle number selection
+    const selectedIndex = parseInt(selectedName) - 1;
+    const tunnelName = selectedIndex >= 0 && selectedIndex < tunnelNames.length 
+      ? tunnelNames[selectedIndex]
+      : selectedName;
+    
+    // Connect to the tunnel
+    await postJson('/gateProxyAdmin/api/cloudflare/connect', { tunnelName });
+    showAlert(`Successfully connected to tunnel: ${tunnelName}`, 'is-success');
+    await updateTunnelStatus();
+    // Reload settings to update status cards
+    bootstrap();
+  } catch (error) {
+    showAlert(error.message || 'Failed to connect to tunnel', 'is-danger');
+  }
+});
+
 async function bootstrap() {
   try {
     settings = await getJson('/gateProxyAdmin/api/settings');
@@ -782,6 +916,7 @@ async function bootstrap() {
     renderResources();
     renderStatusCards();
     loadUsers();
+    updateTunnelStatus();
   } catch (error) {
     showAlert(error.message);
   }

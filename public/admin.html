@@ -99,6 +99,34 @@
                     </div>
                   </div>
                 </form>
+                
+                <hr class="mt-5 mb-5" />
+                
+                <h3 class="title is-5">Cloudflare Tunnel</h3>
+                <div class="field">
+                  <p class="mb-3">Status: <span id="tunnel-status">Checking...</span></p>
+                  <div class="buttons">
+                    <button class="button is-link" id="connect-tunnel-button">Connect to Existing Tunnel</button>
+                  </div>
+                </div>
+                
+                <hr class="mt-5 mb-5" />
+                
+                <h3 class="title is-5">Settings Management</h3>
+                <div class="field">
+                  <div class="buttons">
+                    <button class="button is-link is-outlined" id="export-settings-button">
+                      <span class="icon"><i class="fas fa-download"></i></span>
+                      <span>Export Settings</span>
+                    </button>
+                    <button class="button is-link is-outlined" id="import-settings-button">
+                      <span class="icon"><i class="fas fa-upload"></i></span>
+                      <span>Import Settings</span>
+                    </button>
+                  </div>
+                  <p class="help mt-2">Export/Import configuration settings (passwords are not included for security)</p>
+                </div>
+                <input type="file" id="import-settings-file" accept=".json" style="display: none;" />
               </div>
             </div>
 
