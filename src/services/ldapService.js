@@ -567,3 +567,74 @@ export async function writeWebAuthnCredentials(userDn, credentials) {
   });
 }
 
+export async function createUser(userData, configOverride) {
+  const config = configOverride ?? loadConfig();
+  const client = createClient(config);
+  
+  try {
+    // Validate required fields
+    if (!userData.sAMAccountName || !userData.displayName || !userData.password) {
+      throw new Error('sAMAccountName, displayName, and password are required');
+    }
+    
+    // Build user DN - typically CN={sAMAccountName},CN=Users,{baseDn}
+    // Using sAMAccountName for CN is safer than displayName (which may have special characters)
+    const cn = userData.sAMAccountName.replace(/[,=+<>;"\\]/g, '\\$&'); // Escape DN special characters
+    const usersOu = `CN=Users,${config.auth.baseDn}`;
+    const userDn = `CN=${cn},${usersOu}`;
+    
+    // Build userPrincipalName if domain is available
+    const userPrincipalName = userData.userPrincipalName || 
+      (config.auth.domain ? `${userData.sAMAccountName}@${config.auth.domain}` : null);
+    
+    if (!userPrincipalName) {
+      throw new Error('userPrincipalName is required (either provided or domain must be configured)');
+    }
+    
+    // Prepare attributes for user creation
+    const attributes = [
+      new Attribute({ type: 'objectClass', values: ['top', 'person', 'organizationalPerson', 'user'] }),
+      new Attribute({ type: 'sAMAccountName', values: [userData.sAMAccountName] }),
+      new Attribute({ type: 'userPrincipalName', values: [userPrincipalName] }),
+      new Attribute({ type: 'displayName', values: [userData.displayName] }),
+      new Attribute({ type: 'cn', values: [userData.displayName] }),
+      new Attribute({ type: 'name', values: [userData.displayName] }),
+      // userAccountControl: 512 = normal account, 514 = disabled account
+      new Attribute({ type: 'userAccountControl', values: [String(userData.enabled !== false ? 512 : 514)] })
+    ];
+    
+    // Add optional attributes
+    if (userData.givenName) {
+      attributes.push(new Attribute({ type: 'givenName', values: [userData.givenName] }));
+    }
+    if (userData.sn) {
+      attributes.push(new Attribute({ type: 'sn', values: [userData.sn] }));
+    }
+    if (userData.mail) {
+      attributes.push(new Attribute({ type: 'mail', values: [userData.mail] }));
+    }
+    if (userData.telephoneNumber) {
+      attributes.push(new Attribute({ type: 'telephoneNumber', values: [userData.telephoneNumber] }));
+    }
+    
+    // Create the user (without password first)
+    await client.bind(config.auth.lookupUser, getBindPassword());
+    await client.add(userDn, attributes);
+    
+    // Set password - unicodePwd must be UTF-16LE encoded and wrapped in quotes
+    // Format: '"password"' encoded as UTF-16LE
+    const passwordBuffer = Buffer.from(`"${userData.password}"`, 'utf16le');
+    await client.modify(userDn, [
+      new Change({
+        operation: 'replace',
+        modification: new Attribute({ type: 'unicodePwd', values: [passwordBuffer] })
+      })
+    ]);
+    
+    // Return the created user DN
+    return { dn: userDn, sAMAccountName: userData.sAMAccountName };
+  } finally {
+    await client.unbind();
+  }
+}
+

@@ -17,6 +17,12 @@ const userUnlockButton = document.getElementById('user-unlock');
 const userDisableButton = document.getElementById('user-disable');
 const userForm = document.getElementById('user-form');
 
+const addUserModal = document.getElementById('add-user-modal');
+const addUserButton = document.getElementById('add-user-button');
+const addUserForm = document.getElementById('add-user-form');
+const addUserSaveButton = document.getElementById('add-user-save');
+const addUserCancelButton = document.getElementById('add-user-cancel');
+
 let settings = null;
 let resources = [];
 let activeUser = null;
@@ -555,6 +561,65 @@ async function loadUsers(query = '') {
 userSearchButton.addEventListener('click', (event) => {
   event.preventDefault();
   loadUsers(userQueryInput.value.trim());
+});
+
+// Add User functionality
+addUserButton.addEventListener('click', () => {
+  addUserForm.reset();
+  // Set enabled checkbox to checked by default
+  addUserForm.enabled.checked = true;
+  addUserModal.classList.add('is-active');
+});
+
+addUserCancelButton.addEventListener('click', () => {
+  addUserModal.classList.remove('is-active');
+  addUserForm.reset();
+});
+
+addUserModal.querySelector('.delete').addEventListener('click', () => {
+  addUserModal.classList.remove('is-active');
+  addUserForm.reset();
+});
+
+addUserModal.querySelector('.modal-background').addEventListener('click', () => {
+  addUserModal.classList.remove('is-active');
+  addUserForm.reset();
+});
+
+addUserSaveButton.addEventListener('click', async () => {
+  const formData = new FormData(addUserForm);
+  const password = formData.get('password');
+  
+  if (!password || password.length < 1) {
+    showAlert('Password is required.', 'is-danger');
+    return;
+  }
+  
+  const payload = {
+    sAMAccountName: formData.get('sAMAccountName'),
+    displayName: formData.get('displayName'),
+    password: password,
+    givenName: formData.get('givenName') || undefined,
+    sn: formData.get('sn') || undefined,
+    mail: formData.get('mail') || undefined,
+    telephoneNumber: formData.get('telephoneNumber') || undefined,
+    enabled: formData.get('enabled') === 'on'
+  };
+  
+  // Remove undefined fields
+  Object.keys(payload).forEach(key => payload[key] === undefined && delete payload[key]);
+  
+  try {
+    clearAlert();
+    await postJson('/gateProxyAdmin/api/users', payload);
+    showAlert('User created successfully.', 'is-success');
+    addUserModal.classList.remove('is-active');
+    addUserForm.reset();
+    // Reload users list
+    loadUsers(userQueryInput.value.trim());
+  } catch (error) {
+    showAlert(error.message || 'Failed to create user.', 'is-danger');
+  }
 });
 
 // Group management (Admin groups only - resource groups are configured per-resource)

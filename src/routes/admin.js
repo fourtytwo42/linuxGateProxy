@@ -11,7 +11,8 @@ import {
   enableAccount,
   disableAccount,
   writeWebAuthnCredentials,
-  readWebAuthnCredentials
+  readWebAuthnCredentials,
+  createUser
 } from '../services/ldapService.js';
 import { requireAdmin } from '../middleware/auth.js';
 import { publicDir } from '../utils/paths.js';
@@ -119,6 +120,47 @@ router.get('/gateProxyAdmin/api/users', requireAdmin, async (req, res, next) => 
     }));
     
     res.json({ users: enrichedUsers });
+  } catch (error) {
+    next(error);
+  }
+});
+
+router.post('/gateProxyAdmin/api/users', requireAdmin, async (req, res, next) => {
+  try {
+    const {
+      sAMAccountName,
+      displayName,
+      password,
+      givenName,
+      sn,
+      mail,
+      telephoneNumber,
+      enabled = true
+    } = req.body;
+
+    if (!sAMAccountName || !displayName || !password) {
+      return res.status(400).json({ error: 'sAMAccountName, displayName, and password are required' });
+    }
+
+    // Check if user already exists
+    const existingUser = await findUser(sAMAccountName);
+    if (existingUser) {
+      return res.status(409).json({ error: 'User already exists' });
+    }
+
+    const userData = {
+      sAMAccountName,
+      displayName,
+      password,
+      givenName,
+      sn,
+      mail,
+      telephoneNumber,
+      enabled
+    };
+
+    const result = await createUser(userData);
+    res.json({ success: true, user: result });
   } catch (error) {
     next(error);
   }

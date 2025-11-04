@@ -133,12 +133,20 @@
                     <h2 class="title is-4">Directory Users</h2>
                   </div>
                   <div class="level-right">
-                    <div class="field has-addons">
+                    <div class="field is-grouped">
                       <div class="control">
-                        <input class="input" id="user-query" placeholder="Search by name or SAM" />
+                        <button class="button is-link" id="add-user-button">
+                          <span class="icon"><i class="fas fa-plus"></i></span>
+                          <span>Add User</span>
+                        </button>
                       </div>
-                      <div class="control">
-                        <button class="button is-link" id="user-search">Search</button>
+                      <div class="field has-addons">
+                        <div class="control">
+                          <input class="input" id="user-query" placeholder="Search by name or SAM" />
+                        </div>
+                        <div class="control">
+                          <button class="button is-link" id="user-search">Search</button>
+                        </div>
                       </div>
                     </div>
                   </div>
@@ -188,6 +196,67 @@
           <button class="button is-warning" id="user-reset-webauthn">Clear WebAuthn</button>
           <button class="button is-warning" id="user-unlock">Unlock</button>
           <button class="button is-danger" id="user-disable">Disable</button>
+        </footer>
+      </div>
+    </div>
+
+    <div class="modal" id="add-user-modal">
+      <div class="modal-background"></div>
+      <div class="modal-card">
+        <header class="modal-card-head">
+          <p class="modal-card-title">Add New User</p>
+          <button class="delete" aria-label="close"></button>
+        </header>
+        <section class="modal-card-body">
+          <form id="add-user-form">
+            <div class="field">
+              <label class="label">SAM Account Name <span class="has-text-danger">*</span></label>
+              <input class="input" name="sAMAccountName" required placeholder="username" />
+              <p class="help">The login username (required)</p>
+            </div>
+            <div class="field">
+              <label class="label">Display Name <span class="has-text-danger">*</span></label>
+              <input class="input" name="displayName" required placeholder="Full Name" />
+              <p class="help">The user's full display name (required)</p>
+            </div>
+            <div class="columns">
+              <div class="column">
+                <div class="field">
+                  <label class="label">First Name</label>
+                  <input class="input" name="givenName" placeholder="First" />
+                </div>
+              </div>
+              <div class="column">
+                <div class="field">
+                  <label class="label">Last Name</label>
+                  <input class="input" name="sn" placeholder="Last" />
+                </div>
+              </div>
+            </div>
+            <div class="field">
+              <label class="label">Email</label>
+              <input class="input" type="email" name="mail" placeholder="user@example.com" />
+            </div>
+            <div class="field">
+              <label class="label">Phone</label>
+              <input class="input" name="telephoneNumber" placeholder="+1-555-123-4567" />
+            </div>
+            <div class="field">
+              <label class="label">Password <span class="has-text-danger">*</span></label>
+              <input class="input" type="password" name="password" required placeholder="Enter password" />
+              <p class="help">Initial password for the user (required)</p>
+            </div>
+            <div class="field">
+              <label class="checkbox">
+                <input type="checkbox" name="enabled" checked />
+                Account enabled (user can log in immediately)
+              </label>
+            </div>
+          </form>
+        </section>
+        <footer class="modal-card-foot">
+          <button class="button is-link" id="add-user-save">Create User</button>
+          <button class="button" id="add-user-cancel">Cancel</button>
         </footer>
       </div>
     </div>
