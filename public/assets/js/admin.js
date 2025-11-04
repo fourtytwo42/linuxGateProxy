@@ -1,24 +1,23 @@
-import {
-  createColumnHelper,
-  flexRender,
-  getCoreRowModel,
-  Table
-} from 'https://cdn.jsdelivr.net/npm/@tanstack/table-core@8.10.8/build/esm/index.js';
+let menuLinks = [];
+let views = [];
+let alertBox = null;
+let statusCards = null;
+let settingsForm = null;
 
-const resourceColumnHelper = createColumnHelper();
-const userColumnHelper = createColumnHelper();
+let resourceTableContainer = null;
+let resourceAddButton = null;
+let userTableContainer = null;
+let userSearchButton = null;
+let userQueryInput = null;
 
-const menuLinks = Array.from(document.querySelectorAll('.nav-link[data-view]'));
-const views = Array.from(document.querySelectorAll('.admin-view'));
-const alertBox = document.getElementById('alert');
-const statusCards = document.getElementById('status-cards');
-const settingsForm = document.getElementById('settings-form');
-
-const resourceTableContainer = document.getElementById('resource-table');
-const resourceAddButton = document.getElementById('resource-add');
-const userTableContainer = document.getElementById('user-table');
-const userSearchButton = document.getElementById('user-search');
-const userQueryInput = document.getElementById('user-query');
+const resourceModal = document.getElementById('resource-modal');
+const resourceForm = document.getElementById('resource-form');
+const resourceSaveButton = document.getElementById('resource-save');
+const resourceCancelButton = document.getElementById('resource-cancel');
+const resourceGroupSearch = document.getElementById('resource-group-search');
+const resourceGroupSelect = document.getElementById('resource-group-select');
+const resourceGroupAddBtn = document.getElementById('resource-group-add');
+const resourceGroupsList = document.getElementById('resource-groups-list');
 
 const userModal = document.getElementById('user-modal');
 const userModalTitle = document.getElementById('user-modal-title');
@@ -33,15 +32,6 @@ const addUserButton = document.getElementById('add-user-button');
 const addUserForm = document.getElementById('add-user-form');
 const addUserSaveButton = document.getElementById('add-user-save');
 const addUserCancelButton = document.getElementById('add-user-cancel');
-
-const resourceModal = document.getElementById('resource-modal');
-const resourceForm = document.getElementById('resource-form');
-const resourceSaveButton = document.getElementById('resource-save');
-const resourceCancelButton = document.getElementById('resource-cancel');
-const resourceGroupSearch = document.getElementById('resource-group-search');
-const resourceGroupSelect = document.getElementById('resource-group-select');
-const resourceGroupAddBtn = document.getElementById('resource-group-add');
-const resourceGroupsList = document.getElementById('resource-groups-list');
 
 const adminGroupSearch = document.getElementById('admin-group-search');
 const adminGroupSelect = document.getElementById('admin-group-select');
@@ -61,8 +51,6 @@ let resourceGroups = [];
 let adminGroups = [];
 let activeUser = null;
 let users = [];
-let resourceTableInstance = null;
-let userTableInstance = null;
 let resourceGroupSearchTimeout = null;
 let adminGroupSearchTimeout = null;
 
@@ -80,73 +68,6 @@ function normalizeTone(tone) {
   }
   return tone;
 }
-
-const resourceColumns = [
-  resourceColumnHelper.accessor('name', {
-    header: () => 'Name',
-    cell: info => info.getValue() || '',
-    meta: { renderType: 'resource-name' }
-  }),
-  resourceColumnHelper.accessor('target_url', {
-    header: () => 'Target URL',
-    cell: info => info.getValue() || '',
-    meta: { renderType: 'resource-target' }
-  }),
-  resourceColumnHelper.display({
-    id: 'allowed_groups',
-    header: () => 'Allowed Groups',
-    cell: info => info.row.original.allowed_groups || [],
-    meta: { renderType: 'resource-groups' }
-  }),
-  resourceColumnHelper.display({
-    id: 'resource-actions',
-    header: () => '',
-    cell: info => info.row.original,
-    meta: { renderType: 'resource-actions' }
-  })
-];
-
-const userColumns = [
-  userColumnHelper.accessor('displayName', {
-    header: () => 'Name',
-    cell: info => info.row.original,
-    meta: { renderType: 'user-name' }
-  }),
-  userColumnHelper.accessor('sAMAccountName', {
-    header: () => 'SAM',
-    cell: info => info.row.original,
-    meta: { renderType: 'user-sam' }
-  }),
-  userColumnHelper.accessor('mail', {
-    header: () => 'Email',
-    cell: info => info.row.original,
-    meta: { renderType: 'user-mail' }
-  }),
-  userColumnHelper.display({
-    id: 'lockStatus',
-    header: () => 'Lock Status',
-    cell: info => info.row.original,
-    meta: { renderType: 'user-lock' }
-  }),
-  userColumnHelper.display({
-    id: 'webauthn',
-    header: () => 'WebAuthn',
-    cell: info => info.row.original,
-    meta: { renderType: 'user-webauthn' }
-  }),
-  userColumnHelper.display({
-    id: 'enabled',
-    header: () => 'Enabled',
-    cell: info => info.row.original,
-    meta: { renderType: 'user-enabled' }
-  }),
-  userColumnHelper.display({
-    id: 'actions',
-    header: () => 'Actions',
-    cell: info => info.row.original,
-    meta: { renderType: 'user-actions' }
-  })
-];
 
 function generateId() {
   if (webCrypto?.randomUUID) {
@@ -174,86 +95,47 @@ function clearAlert() {
 }
 
 function switchView(viewId) {
+  if (!viewId) {
+    console.error('switchView called without viewId');
+    return;
+  }
+  
+  console.log('Switching to view:', viewId);
   menuLinks.forEach((link) => link.classList.toggle('is-active', link.dataset.view === viewId));
-  views.forEach((view) => view.classList.toggle('is-active', view.id === `view-${viewId}`));
-}
-
-menuLinks.forEach((link) => link.addEventListener('click', (event) => {
-  event.preventDefault();
-  switchView(link.dataset.view);
-}));
-
-async function getJson(url) {
-  const response = await fetch(url);
-  if (!response.ok) {
-    throw new Error(`Request failed (${response.status})`);
-  }
-  return response.json();
-}
-
-async function postJson(url, payload) {
-  const response = await fetch(url, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(payload)
+  
+  const targetViewId = `view-${viewId}`;
+  let found = false;
+  views.forEach((view) => {
+    if (view.id === targetViewId) {
+      view.classList.add('is-active');
+      found = true;
+    } else {
+      view.classList.remove('is-active');
+    }
   });
-  if (!response.ok) {
-    const data = await response.json().catch(() => ({}));
-    throw new Error(data.error || 'Request failed');
-  }
-  return response.json();
-}
-
-async function deleteResource(id) {
-  const response = await fetch(`/gateProxyAdmin/api/resources/${id}`, { method: 'DELETE' });
-  if (!response.ok) {
-    const data = await response.json().catch(() => ({}));
-    throw new Error(data.error || 'Failed to delete resource');
+  
+  if (!found) {
+    console.error('View not found:', targetViewId);
+    console.log('Available views:', views.map(v => v.id));
   }
 }
 
-function renderTable(container, tableInstance) {
-  if (!container) return;
-  container.innerHTML = '';
-  const tableEl = document.createElement('table');
-  tableEl.className = 'data-grid';
-
-  const thead = document.createElement('thead');
-  tableInstance.getHeaderGroups().forEach((headerGroup) => {
-    const tr = document.createElement('tr');
-    headerGroup.headers.forEach((header) => {
-      const th = document.createElement('th');
-      if (header.isPlaceholder) {
-        tr.appendChild(th);
-        return;
+function setupNavigation() {
+  menuLinks = Array.from(document.querySelectorAll('.nav-link[data-view]'));
+  views = Array.from(document.querySelectorAll('.admin-view'));
+  
+  console.log('Setup navigation - found', menuLinks.length, 'menu links and', views.length, 'views');
+  
+  menuLinks.forEach((link) => {
+    link.addEventListener('click', (event) => {
+      event.preventDefault();
+      const viewId = link.dataset.view;
+      console.log('Menu link clicked:', viewId);
+      if (viewId) {
+        switchView(viewId);
       }
-      const rendered = flexRender(header.column.columnDef.header, header.getContext());
-      th.textContent = rendered ?? '';
-      tr.appendChild(th);
     });
-    thead.appendChild(tr);
   });
-
-  const tbody = document.createElement('tbody');
-  tableInstance.getRowModel().rows.forEach((row) => {
-    const tr = document.createElement('tr');
-    row.getVisibleCells().forEach((cell) => {
-      const td = document.createElement('td');
-      const meta = cell.column.columnDef.meta;
-      if (meta?.renderType) {
-        renderCustomCell(meta.renderType, cell, td);
-      } else {
-        const value = cell.getValue();
-        td.textContent = value == null ? '' : value;
-      }
-      tr.appendChild(td);
-    });
-    tbody.appendChild(tr);
-  });
-
-  tableEl.appendChild(thead);
-  tableEl.appendChild(tbody);
-  container.appendChild(tableEl);
 }
 
 function createInlineEdit(value, label, onEdit) {
@@ -288,27 +170,85 @@ function createBadge(text, tone, onClick) {
   return badge;
 }
 
-function renderCustomCell(type, cell, td) {
-  const row = cell.row.original;
-  switch (type) {
-    case 'resource-name': {
-      td.textContent = row.name || '';
-      break;
-    }
-    case 'resource-target': {
-      const link = document.createElement('a');
-      link.href = row.target_url || '#';
-      link.textContent = row.target_url || '';
-      link.target = '_blank';
-      td.appendChild(link);
-      break;
-    }
-    case 'resource-groups': {
-      const groups = row.allowed_groups || [];
-      if (!groups.length) {
-        td.innerHTML = '<span class="muted">All authenticated users</span>';
-        break;
-      }
+async function getJson(url) {
+  const response = await fetch(url);
+  if (!response.ok) {
+    throw new Error(`Request failed (${response.status})`);
+  }
+  return response.json();
+}
+
+async function postJson(url, payload) {
+  const response = await fetch(url, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload)
+  });
+  if (!response.ok) {
+    const data = await response.json().catch(() => ({}));
+    throw new Error(data.error || 'Request failed');
+  }
+  return response.json();
+}
+
+async function deleteResource(id) {
+  const response = await fetch(`/gateProxyAdmin/api/resources/${id}`, { method: 'DELETE' });
+  if (!response.ok) {
+    const data = await response.json().catch(() => ({}));
+    throw new Error(data.error || 'Failed to delete resource');
+  }
+}
+
+function initDOMElements() {
+  alertBox = document.getElementById('alert');
+  statusCards = document.getElementById('status-cards');
+  settingsForm = document.getElementById('settings-form');
+  resourceTableContainer = document.getElementById('resource-table');
+  resourceAddButton = document.getElementById('resource-add');
+  userTableContainer = document.getElementById('user-table');
+  userSearchButton = document.getElementById('user-search');
+  userQueryInput = document.getElementById('user-query');
+}
+
+// Simple table rendering without TanStack Table
+function renderResourceTable() {
+  if (!resourceTableContainer) return;
+  resourceTableContainer.innerHTML = '';
+  
+  const tableEl = document.createElement('table');
+  tableEl.className = 'data-grid';
+  
+  const thead = document.createElement('thead');
+  thead.innerHTML = `
+    <tr>
+      <th>Name</th>
+      <th>Target URL</th>
+      <th>Allowed Groups</th>
+      <th>Actions</th>
+    </tr>
+  `;
+  
+  const tbody = document.createElement('tbody');
+  resources.forEach((resource) => {
+    const tr = document.createElement('tr');
+    
+    const nameCell = document.createElement('td');
+    nameCell.textContent = resource.name || '';
+    tr.appendChild(nameCell);
+    
+    const targetCell = document.createElement('td');
+    const link = document.createElement('a');
+    link.href = resource.target_url || '#';
+    link.textContent = resource.target_url || '';
+    link.target = '_blank';
+    targetCell.appendChild(link);
+    tr.appendChild(targetCell);
+    
+    const groupsCell = document.createElement('td');
+    const groups = resource.allowed_groups || [];
+    if (groups.length === 0) {
+      groupsCell.innerHTML = '<span class="muted">All authenticated users</span>';
+    } else {
       const list = document.createElement('div');
       list.className = 'chip-collection';
       groups.forEach((group) => {
@@ -319,98 +259,140 @@ function renderCustomCell(type, cell, td) {
         chip.title = dn;
         list.appendChild(chip);
       });
-      td.appendChild(list);
-      break;
+      groupsCell.appendChild(list);
     }
-    case 'resource-actions': {
-      const removeBtn = document.createElement('button');
-      removeBtn.type = 'button';
-      removeBtn.className = 'button is-outline is-danger';
-      removeBtn.textContent = 'Remove';
-      removeBtn.addEventListener('click', async () => {
-        if (!confirm(`Remove resource "${row.name}"?`)) return;
-        try {
-          await deleteResource(row.id);
-          resources = resources.filter((r) => r.id !== row.id);
-          renderResourceTable();
-          renderStatusCards();
-        } catch (error) {
-          showAlert(error.message);
-        }
-      });
-      td.appendChild(removeBtn);
-      break;
-    }
-    case 'user-name': {
-      td.appendChild(createInlineEdit(row.displayName || row.sAMAccountName || '', 'Display Name', () => editUserField(row.sAMAccountName, 'displayName', row.displayName, 'Display Name')));
-      break;
-    }
-    case 'user-sam': {
-      td.appendChild(createInlineEdit(row.sAMAccountName || '', 'SAM Account Name', () => editUserField(row.sAMAccountName, 'sAMAccountName', row.sAMAccountName, 'SAM Account Name')));
-      break;
-    }
-    case 'user-mail': {
-      td.appendChild(createInlineEdit(row.mail || '', 'Email', () => editUserField(row.sAMAccountName, 'mail', row.mail || '', 'Email')));
-      break;
-    }
-    case 'user-lock': {
-      const badge = createBadge(row.isLocked ? 'Locked' : 'Unlocked', row.isLocked ? 'danger' : 'success', row.isLocked ? () => unlockUser(row.sAMAccountName, row.displayName || row.sAMAccountName) : null);
-      badge.title = row.isLocked ? 'Click to unlock' : 'User is unlocked';
-      td.appendChild(badge);
-      break;
-    }
-    case 'user-webauthn': {
-      const badge = createBadge(row.hasWebAuthn ? 'Set' : 'Not Set', row.hasWebAuthn ? 'info' : 'neutral', row.hasWebAuthn ? () => clearWebAuthn(row.sAMAccountName, row.displayName || row.sAMAccountName) : null);
-      badge.title = row.hasWebAuthn ? 'Click to clear WebAuthn credentials' : 'WebAuthn not configured';
-      td.appendChild(badge);
-      break;
-    }
-    case 'user-enabled': {
-      const accountControl = Number(row.userAccountControl || 0);
-      const isDisabled = (accountControl & 2) === 2;
-      const badge = createBadge(isDisabled ? 'Disabled' : 'Enabled', isDisabled ? 'danger' : 'success', () => toggleUserEnabled(row.sAMAccountName, row.displayName || row.sAMAccountName, isDisabled));
-      badge.title = isDisabled ? 'Click to enable user' : 'Click to disable user';
-      td.appendChild(badge);
-      break;
-    }
-    case 'user-actions': {
-      const resetBtn = document.createElement('button');
-      resetBtn.type = 'button';
-      resetBtn.className = 'button is-outline';
-      resetBtn.textContent = 'Reset Password';
-      resetBtn.addEventListener('click', () => resetUserPassword(row.sAMAccountName, row.displayName || row.sAMAccountName));
-      td.appendChild(resetBtn);
-
-      const modalBtn = document.createElement('button');
-      modalBtn.type = 'button';
-      modalBtn.className = 'button is-outline';
-      modalBtn.textContent = 'Manage';
-      modalBtn.addEventListener('click', () => openUserModal(row));
-      td.appendChild(modalBtn);
-      break;
-    }
-    default: {
-      td.textContent = cell.getValue() ?? '';
-    }
-  }
-}
-
-function renderResourceTable() {
-  resourceTableInstance = new Table({
-    data: resources,
-    columns: resourceColumns,
-    getCoreRowModel: getCoreRowModel()
+    tr.appendChild(groupsCell);
+    
+    const actionsCell = document.createElement('td');
+    const removeBtn = document.createElement('button');
+    removeBtn.type = 'button';
+    removeBtn.className = 'button is-outline is-danger';
+    removeBtn.textContent = 'Remove';
+    removeBtn.addEventListener('click', async () => {
+      if (!confirm(`Remove resource "${resource.name}"?`)) return;
+      try {
+        await deleteResource(resource.id);
+        resources = resources.filter((r) => r.id !== resource.id);
+        renderResourceTable();
+        renderStatusCards();
+      } catch (error) {
+        showAlert(error.message);
+      }
+    });
+    actionsCell.appendChild(removeBtn);
+    tr.appendChild(actionsCell);
+    
+    tbody.appendChild(tr);
   });
-  renderTable(resourceTableContainer, resourceTableInstance);
+  
+  tableEl.appendChild(thead);
+  tableEl.appendChild(tbody);
+  resourceTableContainer.appendChild(tableEl);
 }
 
 function renderUserTable() {
-  userTableInstance = new Table({
-    data: users,
-    columns: userColumns,
-    getCoreRowModel: getCoreRowModel()
+  if (!userTableContainer) return;
+  userTableContainer.innerHTML = '';
+  
+  const tableEl = document.createElement('table');
+  tableEl.className = 'data-grid';
+  
+  const thead = document.createElement('thead');
+  thead.innerHTML = `
+    <tr>
+      <th>Name</th>
+      <th>SAM</th>
+      <th>Email</th>
+      <th>Lock Status</th>
+      <th>WebAuthn</th>
+      <th>Enabled</th>
+      <th>Actions</th>
+    </tr>
+  `;
+  
+  const tbody = document.createElement('tbody');
+  users.forEach((user) => {
+    const tr = document.createElement('tr');
+    
+    // Name column with edit
+    const nameCell = document.createElement('td');
+    nameCell.appendChild(createInlineEdit(user.displayName || user.sAMAccountName || '', 'Display Name', () => editUserField(user.sAMAccountName, 'displayName', user.displayName, 'Display Name')));
+    tr.appendChild(nameCell);
+    
+    // SAM column with edit
+    const samCell = document.createElement('td');
+    samCell.appendChild(createInlineEdit(user.sAMAccountName || '', 'SAM Account Name', () => editUserField(user.sAMAccountName, 'sAMAccountName', user.sAMAccountName, 'SAM Account Name')));
+    tr.appendChild(samCell);
+    
+    // Email column with edit
+    const emailCell = document.createElement('td');
+    emailCell.appendChild(createInlineEdit(user.mail || '', 'Email', () => editUserField(user.sAMAccountName, 'mail', user.mail || '', 'Email')));
+    tr.appendChild(emailCell);
+    
+    // Lock Status
+    const lockCell = document.createElement('td');
+    if (user.isLocked) {
+      const lockBadge = createBadge('Locked', 'danger', () => {
+        const displayName = user.displayName || user.sAMAccountName;
+        if (confirm(`Are you sure you want to unlock user "${displayName}"?`)) {
+          unlockUser(user.sAMAccountName, displayName);
+        }
+      });
+      lockBadge.title = 'Click to unlock user';
+      lockBadge.style.cursor = 'pointer';
+      lockCell.appendChild(lockBadge);
+    } else {
+      const lockBadge = createBadge('Unlocked', 'success', null);
+      lockBadge.title = 'User is unlocked';
+      lockCell.appendChild(lockBadge);
+    }
+    tr.appendChild(lockCell);
+    
+    // WebAuthn
+    const webauthnCell = document.createElement('td');
+    if (user.hasWebAuthn) {
+      const webauthnBadge = createBadge('Set', 'info', () => {
+        const displayName = user.displayName || user.sAMAccountName;
+        if (confirm(`Are you sure you want to clear WebAuthn credentials for user "${displayName}"?`)) {
+          clearWebAuthn(user.sAMAccountName, displayName);
+        }
+      });
+      webauthnBadge.title = 'Click to clear WebAuthn credentials';
+      webauthnBadge.style.cursor = 'pointer';
+      webauthnCell.appendChild(webauthnBadge);
+    } else {
+      const webauthnBadge = createBadge('Not Set', 'neutral', null);
+      webauthnBadge.title = 'WebAuthn not configured';
+      webauthnCell.appendChild(webauthnBadge);
+    }
+    tr.appendChild(webauthnCell);
+    
+    // Enabled
+    const enabledCell = document.createElement('td');
+    const accountControl = Number(user.userAccountControl || 0);
+    const isDisabled = (accountControl & 2) === 2;
+    const enabledBadge = createBadge(isDisabled ? 'Disabled' : 'Enabled', isDisabled ? 'danger' : 'success', () => toggleUserEnabled(user.sAMAccountName, user.displayName || user.sAMAccountName, isDisabled));
+    enabledBadge.title = isDisabled ? 'Click to enable user' : 'Click to disable user';
+    enabledCell.appendChild(enabledBadge);
+    tr.appendChild(enabledCell);
+    
+    // Actions
+    const actionsCell = document.createElement('td');
+    const resetBtn = document.createElement('button');
+    resetBtn.type = 'button';
+    resetBtn.className = 'button is-outline';
+    resetBtn.textContent = 'Reset Password';
+    resetBtn.addEventListener('click', () => resetUserPassword(user.sAMAccountName, user.displayName || user.sAMAccountName));
+    
+    actionsCell.appendChild(resetBtn);
+    tr.appendChild(actionsCell);
+    
+    tbody.appendChild(tr);
   });
-  renderTable(userTableContainer, userTableInstance);
+  
+  tableEl.appendChild(thead);
+  tableEl.appendChild(tbody);
+  userTableContainer.appendChild(tableEl);
 }
 
 function renderStatusCards() {
@@ -729,10 +711,9 @@ async function editUserField(sam, field, currentValue, fieldLabel) {
 }
 
 async function unlockUser(sam, displayName) {
-  if (!confirm(`Unlock user "${displayName}"?`)) return;
   try {
     await postJson(`/gateProxyAdmin/api/users/${sam}/unlock`, {});
-    showAlert('User unlocked.', 'success');
+    showAlert(`User "${displayName}" has been unlocked.`, 'success');
     loadUsers(userQueryInput.value.trim());
   } catch (error) {
     showAlert(error.message);
@@ -740,10 +721,9 @@ async function unlockUser(sam, displayName) {
 }
 
 async function clearWebAuthn(sam, displayName) {
-  if (!confirm(`Clear WebAuthn credentials for "${displayName}"?`)) return;
   try {
     await postJson(`/gateProxyAdmin/api/users/${sam}/reset-webauthn`, {});
-    showAlert('WebAuthn credentials cleared.', 'success');
+    showAlert(`WebAuthn credentials for "${displayName}" have been cleared.`, 'success');
     loadUsers(userQueryInput.value.trim());
   } catch (error) {
     showAlert(error.message);
@@ -957,11 +937,29 @@ requestCertificateButton?.addEventListener('click', async () => {
 });
 
 async function initialize() {
+  initDOMElements();
+  setupNavigation();
   await Promise.all([loadSettings(), loadResources(), loadUsers()]);
   switchView('dashboard');
 }
 
-initialize().catch((error) => {
-  showAlert(error.message || 'Initialization failed');
-});
+// Wait for DOM to be ready
+if (document.readyState === 'loading') {
+  document.addEventListener('DOMContentLoaded', () => {
+    initialize().catch((error) => {
+      console.error('Initialization failed:', error);
+      if (alertBox) {
+        showAlert(error.message || 'Initialization failed');
+      }
+    });
+  });
+} else {
+  // DOM already loaded
+  initialize().catch((error) => {
+    console.error('Initialization failed:', error);
+    if (alertBox) {
+      showAlert(error.message || 'Initialization failed');
+    }
+  });
+}
 
