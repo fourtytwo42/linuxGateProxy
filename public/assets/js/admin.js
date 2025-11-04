@@ -519,7 +519,39 @@ async function loadGroupsFromSettings() {
   if (settings && settings.auth) {
     // Load admin groups (allowed groups are now configured per-resource)
     const adminDns = settings.auth.adminGroupDns || [];
-    adminGroups = adminDns.map((dn) => ({ dn, name: dn }));
+    
+    // Fetch actual group information from AD for each configured DN
+    adminGroups = [];
+    for (const dn of adminDns) {
+      try {
+        // Search for the group by DN - the API supports searching by DN
+        const response = await fetch(`/admin/api/groups?query=${encodeURIComponent(dn)}&size=100`);
+        const data = await response.json();
+        
+        if (data.groups && data.groups.length > 0) {
+          // Find exact match by DN (case-insensitive)
+          const group = data.groups.find((g) => 
+            (g.distinguishedName || g.dn || '').toLowerCase() === dn.toLowerCase()
+          );
+          
+          if (group) {
+            const name = group.cn || group.name || group.sAMAccountName || dn;
+            adminGroups.push({ dn, name });
+          } else {
+            // If no exact match found, use DN as fallback
+            adminGroups.push({ dn, name: dn });
+          }
+        } else {
+          // If search returns no results, use DN as fallback
+          adminGroups.push({ dn, name: dn });
+        }
+      } catch (error) {
+        console.error(`Error fetching group info for ${dn}:`, error);
+        // On error, use DN as fallback
+        adminGroups.push({ dn, name: dn });
+      }
+    }
+    
     renderGroupList(adminGroups, adminGroupsList, 'admin');
     updateGroupHiddenInput('admin');
   }

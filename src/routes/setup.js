@@ -69,8 +69,9 @@ router.post('/api/setup/ldap', async (req, res, next) => {
 
     const existingAuth = loadConfig().auth;
 
-    // Default to "Domain Admins" if no admin groups are specified
-    const defaultAdminGroups = adminGroupDns.length ? adminGroupDns : (existingAuth.adminGroupDns?.length ? existingAuth.adminGroupDns : ['Domain Admins']);
+    // During setup, always default to "Domain Admins" if no admin groups are specified
+    // Users can add more groups later in the admin settings page
+    const defaultAdminGroups = adminGroupDns.length ? adminGroupDns : ['Domain Admins'];
 
     saveConfigSection('auth', {
       ...existingAuth,
@@ -155,17 +156,7 @@ router.post('/api/setup/smtp', (req, res) => {
   res.json({ success: true });
 });
 
-router.post('/api/setup/admin', (req, res) => {
-  const { adminGroupDns = [], allowedGroupDns = [] } = req.body;
 
-  saveConfigSection('auth', {
-    ...loadConfig().auth,
-    adminGroupDns,
-    allowedGroupDns
-  });
-
-  res.json({ success: true });
-});
 
 router.post('/api/setup/samba', (req, res) => {
   const { shareName = 'GateProxySetup', guestOk = false } = req.body;
