@@ -8,6 +8,8 @@ import cookieParser from 'cookie-parser';
 
 import { ensureDirSync } from './utils/fs.js';
 import { dataDir, runtimeDir, tempDir, shareDir, publicDir, projectRoot } from './utils/paths.js';
+
+const scriptsDir = path.join(projectRoot, 'scripts');
 import fs from 'fs';
 import { loadConfig } from './config/index.js';
 import { authenticate, requireAuth } from './middleware/auth.js';
@@ -23,29 +25,6 @@ import { logger } from './utils/logger.js';
 
 function bootstrapDirectories() {
   [dataDir, runtimeDir, tempDir, shareDir].forEach((dir) => ensureDirSync(dir));
-}
-
-function copyScriptsToShare() {
-  const scriptsDir = path.join(projectRoot, 'scripts');
-  if (!fs.existsSync(scriptsDir)) {
-    logger.warn('Scripts directory not found', { scriptsDir });
-    return;
-  }
-  
-  try {
-    for (const entry of fs.readdirSync(scriptsDir)) {
-      const src = path.join(scriptsDir, entry);
-      const dest = path.join(shareDir, entry);
-      if (fs.statSync(src).isFile()) {
-        fs.copyFileSync(src, dest);
-        fs.chmodSync(dest, 0o644); // Readable by all for HTTP serving
-        logger.debug('Copied script to share', { file: entry });
-      }
-    }
-    logger.info('Scripts copied to share directory', { scriptsDir, shareDir });
-  } catch (error) {
-    logger.error('Error copying scripts to share directory', { error: error.message });
-  }
 }
 
 function resolveListenEndpoint(config) {
@@ -78,7 +57,6 @@ function resolveListenEndpoint(config) {
 
 async function startServer() {
   bootstrapDirectories();
-  copyScriptsToShare();
 
   const app = express();
 
@@ -128,8 +106,8 @@ async function startServer() {
   app.use(express.static(publicDir, { index: false }));
   app.use('/assets', express.static(path.join(publicDir, 'assets')));
 
-  // Serve setup scripts via HTTP (alternative to Samba share)
-  app.use('/share', express.static(shareDir, {
+  // Serve setup scripts directly from scripts directory (no copying needed)
+  app.use('/share', express.static(scriptsDir, {
     index: false,
     setHeaders: (res, filePath) => {
       // Set appropriate headers for file downloads
