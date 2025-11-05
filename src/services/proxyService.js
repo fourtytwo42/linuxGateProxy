@@ -52,86 +52,62 @@ proxy.on('proxyRes', (proxyRes, req, res) => {
   if (contentType.includes('text/html') && req.auth?.isAdmin) {
     logger.debug('Injecting admin overlay for HTML response', { url: req.url });
     
-    // Collect all response chunks
-    let bodyChunks = [];
-    let headersSent = false;
+    // Remove content-encoding header since we'll modify the body
+    delete proxyRes.headers['content-encoding'];
+    delete proxyRes.headers['Content-Encoding'];
+    delete proxyRes.headers['transfer-encoding'];
+    delete proxyRes.headers['Transfer-Encoding'];
     
-    // Override proxyRes's data handler to collect chunks instead of piping
-    proxyRes.on('data', (chunk) => {
-      bodyChunks.push(chunk);
-    });
+    // Use a transform stream to collect and modify the body
+    let bodyBuffer = Buffer.alloc(0);
     
-    // When response ends, modify and send
-    proxyRes.on('end', () => {
-      if (headersSent) return;
-      
-      try {
-        const body = Buffer.concat(bodyChunks).toString('utf8');
-        
-        // Inject admin overlay script before </body> or at end if no body tag
-        const overlayScript = `
+    const transform = new Transform({
+      transform(chunk, encoding, callback) {
+        // Collect all chunks
+        bodyBuffer = Buffer.concat([bodyBuffer, chunk]);
+        callback();
+      },
+      flush(callback) {
+        try {
+          const body = bodyBuffer.toString('utf8');
+          
+          // Inject admin overlay script before </body> or at end if no body tag
+          const overlayScript = `
 <script>
 window.GateProxyAdminOverlay = true;
 </script>
 <script src="/assets/js/admin-overlay.js"></script>`;
-        
-        let modifiedBody = body;
-        if (body.includes('</body>')) {
-          modifiedBody = body.replace('</body>', overlayScript + '\n</body>');
-        } else if (body.includes('</html>')) {
-          modifiedBody = body.replace('</html>', overlayScript + '\n</html>');
-        } else {
-          modifiedBody = body + overlayScript;
-        }
-        
-        // Update headers
-        const newBody = Buffer.from(modifiedBody, 'utf8');
-        
-        // Copy status code and headers from proxyRes
-        res.statusCode = proxyRes.statusCode;
-        res.statusMessage = proxyRes.statusMessage;
-        
-        // Copy all headers except content-length and encoding
-        Object.keys(proxyRes.headers).forEach((key) => {
-          if (key.toLowerCase() !== 'content-length' && 
-              key.toLowerCase() !== 'content-encoding' &&
-              key.toLowerCase() !== 'transfer-encoding') {
-            res.setHeader(key, proxyRes.headers[key]);
+          
+          let modifiedBody = body;
+          if (body.includes('</body>')) {
+            modifiedBody = body.replace('</body>', overlayScript + '\n</body>');
+          } else if (body.includes('</html>')) {
+            modifiedBody = body.replace('</html>', overlayScript + '\n</html>');
+          } else {
+            modifiedBody = body + overlayScript;
           }
-        });
-        
-        res.setHeader('Content-Length', newBody.length);
-        headersSent = true;
-        
-        // Send modified body
-        res.write(newBody);
-        res.end();
-      } catch (error) {
-        logger.error('Error injecting admin overlay', { error: error.message });
-        // Send original body on error
-        if (!headersSent) {
-          res.statusCode = proxyRes.statusCode;
-          Object.keys(proxyRes.headers).forEach((key) => {
-            res.setHeader(key, proxyRes.headers[key]);
-          });
-          headersSent = true;
+          
+          // Update content length
+          const newBody = Buffer.from(modifiedBody, 'utf8');
+          res.setHeader('Content-Length', newBody.length);
+          
+          // Push the modified body
+          this.push(newBody);
+          callback();
+        } catch (error) {
+          logger.error('Error injecting admin overlay', { error: error.message });
+          // Push original body on error
+          this.push(bodyBuffer);
+          callback();
         }
-        res.write(Buffer.concat(bodyChunks));
-        res.end();
       }
     });
     
-    // Handle errors
-    proxyRes.on('error', (error) => {
-      logger.error('Error in proxy response stream', { error: error.message });
-      if (!headersSent) {
-        res.statusCode = 502;
-        res.end('Proxy error');
-      }
-    });
+    // Pipe proxyRes through transform to res
+    proxyRes.pipe(transform).pipe(res);
     
-    // Prevent automatic piping - we'll handle it manually
-    proxyRes.pause();
+    // Prevent http-proxy from automatically piping
+    return false;
   }
 });
 
