@@ -39,10 +39,17 @@ proxy.on('proxyReq', (proxyReq, req, res) => {
   });
 });
 
-// Store original write function to intercept HTML responses
-const originalWrite = httpProxy.Server.prototype.constructor;
-
 export function proxyRequest(req, res, next, target) {
+  // Check if user is admin for overlay injection
+  let isAdmin = false;
+  if (req.auth?.user) {
+    const config = loadConfig();
+    const adminGroups = (config.adminPortal?.allowedGroupDns?.length
+      ? config.adminPortal.allowedGroupDns
+      : config.auth.adminGroupDns) || [];
+    isAdmin = userHasGroup(req.auth.user, adminGroups);
+    req.auth.isAdmin = isAdmin;
+  }
   if (!target) {
     logger.error('Proxy target not configured', { url: req.url, originalUrl: req.originalUrl });
     res.status(500).json({ error: 'Proxy target not configured' });
