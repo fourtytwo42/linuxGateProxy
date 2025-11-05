@@ -586,12 +586,14 @@ function closeResourceModal() {
   resourceModal.classList.remove('is-active');
 }
 
-resourceAddButton?.addEventListener('click', async () => {
-  if (resourceGroupSelect.options.length <= 1) {
-    await searchGroups('*', resourceGroupSelect, 200);
-  }
-  openResourceModal();
-});
+function setupResourceAddButton() {
+  resourceAddButton?.addEventListener('click', async () => {
+    if (resourceGroupSelect.options.length <= 1) {
+      await searchGroups('*', resourceGroupSelect, 200);
+    }
+    openResourceModal();
+  });
+}
 
 resourceModal?.querySelector('.modal-background')?.addEventListener('click', closeResourceModal);
 resourceModal?.querySelector('.delete')?.addEventListener('click', closeResourceModal);
@@ -1110,6 +1112,7 @@ requestCertificateButton?.addEventListener('click', async () => {
 async function initialize() {
   initDOMElements();
   setupNavigation();
+  setupResourceAddButton(); // Setup resource add button after DOM elements are initialized
   await Promise.all([loadSettings(), loadResources(), loadUsers()]);
   switchView('dashboard');
   
