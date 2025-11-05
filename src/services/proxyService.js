@@ -1,4 +1,5 @@
 import httpProxy from 'http-proxy';
+import { Transform } from 'stream';
 import { loadConfig } from '../config/index.js';
 import { logger } from '../utils/logger.js';
 import { userHasGroup } from './ldapService.js';
@@ -51,63 +52,86 @@ proxy.on('proxyRes', (proxyRes, req, res) => {
   if (contentType.includes('text/html') && req.auth?.isAdmin) {
     logger.debug('Injecting admin overlay for HTML response', { url: req.url });
     
-    // Store chunks to inject script before </body>
-    let chunks = [];
-    let injected = false;
+    // Collect all response chunks
+    let bodyChunks = [];
+    let headersSent = false;
     
-    // Override the write method to capture chunks
-    const originalWrite = res.write.bind(res);
-    res.write = function(chunk, encoding, callback) {
-      if (chunk) {
-        chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk, encoding));
-      }
-      // Don't write yet - we'll write everything at once in end()
-      return true;
-    };
+    // Override proxyRes's data handler to collect chunks instead of piping
+    proxyRes.on('data', (chunk) => {
+      bodyChunks.push(chunk);
+    });
     
-    // Override the end method to inject script before sending
-    const originalEnd = res.end.bind(res);
-    res.end = function(chunk, encoding, callback) {
-      if (injected) {
-        return originalEnd.call(this, chunk, encoding, callback);
-      }
+    // When response ends, modify and send
+    proxyRes.on('end', () => {
+      if (headersSent) return;
       
-      if (chunk) {
-        chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk, encoding));
-      }
-      
-      // Combine all chunks
-      const body = Buffer.concat(chunks).toString('utf8');
-      
-      // Inject admin overlay script before </body> or at end if no body tag
-      const overlayScript = `
+      try {
+        const body = Buffer.concat(bodyChunks).toString('utf8');
+        
+        // Inject admin overlay script before </body> or at end if no body tag
+        const overlayScript = `
 <script>
 window.GateProxyAdminOverlay = true;
 </script>
 <script src="/assets/js/admin-overlay.js"></script>`;
-      
-      let modifiedBody = body;
-      if (body.includes('</body>')) {
-        modifiedBody = body.replace('</body>', overlayScript + '\n</body>');
-      } else if (body.includes('</html>')) {
-        modifiedBody = body.replace('</html>', overlayScript + '\n</html>');
-      } else {
-        modifiedBody = body + overlayScript;
+        
+        let modifiedBody = body;
+        if (body.includes('</body>')) {
+          modifiedBody = body.replace('</body>', overlayScript + '\n</body>');
+        } else if (body.includes('</html>')) {
+          modifiedBody = body.replace('</html>', overlayScript + '\n</html>');
+        } else {
+          modifiedBody = body + overlayScript;
+        }
+        
+        // Update headers
+        const newBody = Buffer.from(modifiedBody, 'utf8');
+        
+        // Copy status code and headers from proxyRes
+        res.statusCode = proxyRes.statusCode;
+        res.statusMessage = proxyRes.statusMessage;
+        
+        // Copy all headers except content-length and encoding
+        Object.keys(proxyRes.headers).forEach((key) => {
+          if (key.toLowerCase() !== 'content-length' && 
+              key.toLowerCase() !== 'content-encoding' &&
+              key.toLowerCase() !== 'transfer-encoding') {
+            res.setHeader(key, proxyRes.headers[key]);
+          }
+        });
+        
+        res.setHeader('Content-Length', newBody.length);
+        headersSent = true;
+        
+        // Send modified body
+        res.write(newBody);
+        res.end();
+      } catch (error) {
+        logger.error('Error injecting admin overlay', { error: error.message });
+        // Send original body on error
+        if (!headersSent) {
+          res.statusCode = proxyRes.statusCode;
+          Object.keys(proxyRes.headers).forEach((key) => {
+            res.setHeader(key, proxyRes.headers[key]);
+          });
+          headersSent = true;
+        }
+        res.write(Buffer.concat(bodyChunks));
+        res.end();
       }
-      
-      // Update content length
-      const newBody = Buffer.from(modifiedBody, 'utf8');
-      res.setHeader('Content-Length', newBody.length);
-      
-      // Remove content-encoding if present (we've modified the body)
-      res.removeHeader('Content-Encoding');
-      res.removeHeader('content-encoding');
-      
-      injected = true;
-      
-      // Write the modified body
-      originalEnd.call(this, newBody, encoding, callback);
-    };
+    });
+    
+    // Handle errors
+    proxyRes.on('error', (error) => {
+      logger.error('Error in proxy response stream', { error: error.message });
+      if (!headersSent) {
+        res.statusCode = 502;
+        res.end('Proxy error');
+      }
+    });
+    
+    // Prevent automatic piping - we'll handle it manually
+    proxyRes.pause();
   }
 });
 
