@@ -332,23 +332,25 @@
         <form id="step-6" class="setup-step" data-step-index="6">
           <header class="step-header">
             <span class="step-pill" data-step-label></span>
-            <h2>Add the apps you want to protect</h2>
-            <p>We start with one main target, then you can add more cards.</p>
+            <h2>Add resources you want to protect</h2>
+            <p>We start with one main target, then you can add more resources.</p>
           </header>
 
           <div class="step-body">
             <label>
               <span>Main target URL</span>
-              <input name="targetHost" placeholder="http://127.0.0.1:5600" required />
+              <input name="targetHost" placeholder="http://127.0.0.1:5600" />
+              <small class="muted small">The primary application or service you want to protect</small>
             </label>
 
             <div id="resource-list" class="resource-stack"></div>
 
-            <button class="outline" type="button" id="add-resource">Add another app</button>
+            <button class="outline" type="button" id="add-resource">Add another resource</button>
           </div>
 
           <footer class="step-footer">
             <button class="ghost" type="button" data-action="prev">Back</button>
+            <button class="ghost" type="button" id="skip-resources">Skip for now</button>
             <button class="primary" type="submit">Save resources</button>
           </footer>
         </form>

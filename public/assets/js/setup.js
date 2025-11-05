@@ -952,6 +952,23 @@ function addResourceRow(resource = {}) {
 
 addResourceButton.addEventListener('click', () => addResourceRow());
 
+// Skip resources step
+document.getElementById('skip-resources').addEventListener('click', async (event) => {
+  event.preventDefault();
+  // Save empty configuration
+  try {
+    await postJson('/api/setup/proxy', {
+      targetHost: '',
+      resources: []
+    });
+    setupState.resources = { targetHost: '', resources: [] };
+    prepareSummary();
+    showStep(7);
+  } catch (error) {
+    showAlert(error.message);
+  }
+});
+
 resourcesForm.addEventListener('submit', async (event) => {
   event.preventDefault();
   const payload = serializeForm(event.target);
@@ -963,10 +980,10 @@ resourcesForm.addEventListener('submit', async (event) => {
   });
   try {
     await postJson('/api/setup/proxy', {
-      targetHost: payload.targetHost,
+      targetHost: payload.targetHost || '',
       resources
     });
-    setupState.resources = { targetHost: payload.targetHost, resources };
+    setupState.resources = { targetHost: payload.targetHost || '', resources };
     prepareSummary();
     showStep(7);
   } catch (error) {
