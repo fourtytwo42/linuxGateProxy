@@ -39,6 +39,61 @@ proxy.on('proxyReq', (proxyReq, req, res) => {
   });
 });
 
+proxy.on('proxyRes', (proxyRes, req, res) => {
+  logger.debug('Proxy response received', {
+    statusCode: proxyRes.statusCode,
+    statusMessage: proxyRes.statusMessage,
+    contentType: proxyRes.headers['content-type']
+  });
+  
+  // Inject admin overlay script for HTML responses if user is admin
+  const contentType = proxyRes.headers['content-type'] || '';
+  if (contentType.includes('text/html') && req.auth?.isAdmin) {
+    // Store chunks to inject script before </body>
+    let chunks = [];
+    const originalWrite = res.write.bind(res);
+    const originalEnd = res.end.bind(res);
+    
+    res.write = function(chunk) {
+      if (chunk) chunks.push(chunk);
+      return true;
+    };
+    
+    res.end = function(chunk) {
+      if (chunk) chunks.push(chunk);
+      
+      // Combine all chunks
+      let body = Buffer.concat(chunks).toString('utf8');
+      
+      // Inject admin overlay script before </body> or at end if no body tag
+      const overlayScript = `
+<script>
+window.GateProxyAdminOverlay = true;
+</script>
+<script src="/assets/js/admin-overlay.js"></script>`;
+      
+      if (body.includes('</body>')) {
+        body = body.replace('</body>', overlayScript + '\n</body>');
+      } else if (body.includes('</html>')) {
+        body = body.replace('</html>', overlayScript + '\n</html>');
+      } else {
+        body += overlayScript;
+      }
+      
+      // Update content length
+      const newBody = Buffer.from(body, 'utf8');
+      res.setHeader('Content-Length', newBody.length);
+      
+      // Remove content-encoding if present (we've modified the body)
+      res.removeHeader('Content-Encoding');
+      
+      // Write the modified body
+      originalWrite(newBody);
+      originalEnd();
+    };
+  }
+});
+
 export function proxyRequest(req, res, next, target) {
   // Check if user is admin for overlay injection
   let isAdmin = false;
