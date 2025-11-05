@@ -463,6 +463,7 @@ async function startServer() {
               configFile: result.configFile 
             });
             
+            const { runTunnel } = await import('./services/cloudflareService.js');
             await runTunnel(result.tunnelName, {
               configFile: result.configFile
             }).catch((error) => {

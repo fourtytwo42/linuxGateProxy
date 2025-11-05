@@ -45,8 +45,6 @@ const importSettingsFile = document.getElementById('import-settings-file');
 const exportCloudflaredCertButton = document.getElementById('export-cloudflared-cert-button');
 const importCloudflaredCertButton = document.getElementById('import-cloudflared-cert-button');
 const importCloudflaredCertFile = document.getElementById('import-cloudflared-cert-file');
-const setupTunnelButton = document.getElementById('setup-tunnel-button');
-const connectTunnelButton = document.getElementById('connect-tunnel-button');
 const requestCertificateButton = document.getElementById('request-certificate-button');
 
 let settings = null;
@@ -1108,93 +1106,35 @@ async function updateTunnelStatus() {
   }
 }
 
-// Auto-detect tunnel button
-const autoDetectTunnelButton = document.getElementById('auto-detect-tunnel-button');
-setupTunnelButton?.addEventListener('click', async () => {
+// Repair tunnel button (only shown when something is wrong)
+const repairTunnelButton = document.getElementById('repair-tunnel-button');
+repairTunnelButton?.addEventListener('click', async () => {
   try {
-    if (!settings?.cloudflare?.isLinked && !settings?.cloudflare?.tunnelName) {
-      showAlert('Make sure Cloudflare authentication is completed in the setup flow before configuring a tunnel.');
-      return;
+    repairTunnelButton.disabled = true;
+    repairTunnelButton.textContent = 'Repairing...';
+    
+    showAlert('Repairing Cloudflare tunnel connection...', 'info');
+    
+    const result = await postJson('/gateProxyAdmin/api/cloudflare/auto-manage', {});
+    
+    if (result.status === 'SKIPPED') {
+      showAlert(`Tunnel repair skipped: ${result.reason || 'unknown reason'}`, 'warning');
+    } else if (result.status === 'FAILED') {
+      showAlert(`Tunnel repair failed: ${result.error || result.reason || 'unknown error'}`, 'danger');
+    } else {
+      const actionText = result.action === 'created' ? 'created and configured' : 
+                        result.action === 'connected' ? 'connected to existing tunnel' : 
+                        result.action === 'updated' ? 'updated configuration' : 'repaired';
+      showAlert(`Tunnel ${actionText} successfully${result.started ? ' and started' : ''}.`, 'success');
     }
-
-    let defaultHostname = settings?.cloudflare?.hostname || '';
-    if (!defaultHostname && settings?.site?.publicBaseUrl) {
-      try {
-        const parsed = new URL(settings.site.publicBaseUrl.includes('://')
-          ? settings.site.publicBaseUrl
-          : `https://${settings.site.publicBaseUrl}`);
-        defaultHostname = parsed.hostname;
-      } catch (error) {
-        console.warn('Failed to parse publicBaseUrl for hostname', error);
-      }
-    }
-
-    const hostnameInput = prompt('Enter the public hostname for Gate Proxy (e.g. portal.example.com):', defaultHostname || '');
-    if (!hostnameInput) return;
-
-    const hostname = hostnameInput.trim();
-    if (!hostname) {
-      showAlert('Hostname cannot be empty.');
-      return;
-    }
-
-    let tunnelName = settings?.cloudflare?.tunnelName || '';
-    if (!tunnelName) {
-      tunnelName = `gateproxy-${hostname.replace(/[^a-zA-Z0-9-]+/g, '-').replace(/-{2,}/g, '-').replace(/^-+|-+$/g, '').toLowerCase()}`;
-    }
-
-    const originalText = setupTunnelButton.textContent;
-    setupTunnelButton.disabled = true;
-    setupTunnelButton.textContent = 'Setting up...';
-
-    const result = await postJson('/gateProxyAdmin/api/cloudflare/setup', {
-      tunnelName,
-      hostname,
-      originUrl: 'http://127.0.0.1:5000'
-    });
-
-    showAlert(`Tunnel "${result.tunnel?.tunnelName || tunnelName}" configured${result.started ? ' and started' : ''}.`, 'success');
+    
     await loadSettings();
     await updateTunnelStatus();
   } catch (error) {
-    showAlert(error.message);
+    showAlert(`Repair failed: ${error.message}`, 'danger');
   } finally {
-    setupTunnelButton.disabled = false;
-    setupTunnelButton.textContent = originalText || 'Set up tunnel';
-  }
-});
-autoDetectTunnelButton?.addEventListener('click', async () => {
-  try {
-    autoDetectTunnelButton.disabled = true;
-    autoDetectTunnelButton.textContent = 'Detecting...';
-    
-    const result = await postJson('/gateProxyAdmin/api/cloudflare/auto-detect', {});
-    
-    if (result.success) {
-      showAlert(`Tunnel "${result.tunnel.name}" auto-detected and connected successfully!`, 'success');
-      await loadSettings();
-      await updateTunnelStatus();
-    }
-  } catch (error) {
-    showAlert(error.message);
-  } finally {
-    autoDetectTunnelButton.disabled = false;
-    autoDetectTunnelButton.textContent = 'Auto-detect tunnel';
-  }
-});
-
-connectTunnelButton?.addEventListener('click', async () => {
-  try {
-    const data = await getJson('/gateProxyAdmin/api/cloudflare/tunnels');
-    const tunnelNames = data.tunnels?.map((tunnel) => tunnel.name || tunnel.id)?.join('\n') || 'No tunnels available';
-    const selected = prompt(`Enter the name or ID of the tunnel to link:\n${tunnelNames}`);
-    if (!selected) return;
-    await postJson('/gateProxyAdmin/api/cloudflare/connect', { tunnelName: selected });
-    showAlert('Cloudflare tunnel linked.', 'success');
-    await loadSettings();
-    await updateTunnelStatus();
-  } catch (error) {
-    showAlert(error.message);
+    repairTunnelButton.disabled = false;
+    repairTunnelButton.textContent = 'Repair tunnel';
   }
 });
 
