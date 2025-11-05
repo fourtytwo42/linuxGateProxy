@@ -883,9 +883,11 @@ if (serverForm) {
 
 // Helper function to navigate after server setup
 async function navigateAfterServerSetup() {
-  // If OTP is enabled, show email setup (step 4)
+  // Only show email setup (step 4) if OTP is enabled
   // Otherwise skip to Cloudflare (step 5)
-  if (setupState.enableOtp) {
+  if (setupState.enableOtp === true) {
+    // Reset email test status when showing email step
+    emailTestPassed = false;
     showStep(4);
   } else {
     // Skip email setup, go to Cloudflare
