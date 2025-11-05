@@ -45,7 +45,11 @@ export const defaultSettings = {
     tunnelName: '',
     credentialFile: '',
     accountTag: '',
-    certPem: ''
+    certPem: '',
+    configFile: '',
+    hostname: '',
+    originUrl: 'http://localhost:5000',
+    tunnelId: ''
   },
   setup: {
     completed: false,

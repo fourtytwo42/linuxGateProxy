@@ -1074,6 +1074,7 @@ cloudflareStartBtn.addEventListener('click', async (event) => {
         </div>
       `;
       setupState.cloudflare = { configured: true };
+      await finalizeCloudflareTunnel();
     } else if (response.url) {
       cloudflareStatus.innerHTML = `
         <div id="cloudflare-url-container">
@@ -1109,6 +1110,7 @@ cloudflareStartBtn.addEventListener('click', async (event) => {
               </div>
             `;
             setupState.cloudflare = { configured: true };
+            await finalizeCloudflareTunnel();
           }
         } catch (error) {
           // Ignore polling errors, just continue checking
@@ -1134,6 +1136,84 @@ if (cloudflareStep) {
     }
   });
   observer.observe(cloudflareStep, { attributes: true, attributeFilter: ['class'] });
+}
+
+async function finalizeCloudflareTunnel() {
+  if (!cloudflareStatus) return;
+  setupState.cloudflare = setupState.cloudflare || {};
+  if (setupState.cloudflare.tunnelSetupComplete || setupState.cloudflare.tunnelSetupInProgress) {
+    return;
+  }
+
+  setupState.cloudflare.tunnelSetupInProgress = true;
+
+  try {
+    cloudflareStatus.innerHTML = '<p>Automatically configuring Cloudflare tunnel...</p>';
+
+    // Extract hostname from publicBaseUrl if available
+    let hostname = '';
+    if (setupState.site?.publicBaseUrl) {
+      try {
+        const parsed = new URL(setupState.site.publicBaseUrl.includes('://')
+          ? setupState.site.publicBaseUrl
+          : `https://${setupState.site.publicBaseUrl}`);
+        hostname = parsed.hostname;
+      } catch (error) {
+        console.warn('Failed to parse publicBaseUrl for tunnel hostname', error);
+      }
+    }
+
+    // Automatically manage tunnel (connect to existing or create new)
+    try {
+      const result = await postJson('/api/setup/cloudflare/auto-manage', {
+        hostname: hostname || null
+      });
+
+      if (result.status === 'SKIPPED') {
+        cloudflareStatus.innerHTML = `
+          <div class="notification is-info">
+            <p><strong>Authentication complete.</strong></p>
+            <p>Tunnel management skipped: ${result.reason || 'unknown reason'}</p>
+          </div>`;
+        setupState.cloudflare.tunnelSetupComplete = false;
+      } else if (result.status === 'FAILED') {
+        cloudflareStatus.innerHTML = `
+          <div class="notification is-warning">
+            <p><strong>Authentication complete, but tunnel setup failed.</strong></p>
+            <p>${result.error || result.reason || 'Check the server logs for details.'}</p>
+            <p>You can retry from the admin dashboard.</p>
+          </div>`;
+        setupState.cloudflare.tunnelSetupComplete = false;
+      } else {
+        setupState.cloudflare.tunnelSetupComplete = true;
+        setupState.cloudflare.hostname = result.hostname;
+        setupState.cloudflare.tunnel = result;
+
+        const actionText = result.action === 'created' ? 'created and configured' : 
+                          result.action === 'connected' ? 'connected to existing tunnel' : 
+                          result.action === 'updated' ? 'updated configuration' : 'configured';
+
+        cloudflareStatus.innerHTML = `
+          <div class="notification is-success">
+            <p><strong>Cloudflare tunnel ${actionText}.</strong></p>
+            <p>Tunnel: <code>${result.tunnelName}</code></p>
+            ${result.hostname ? `<p>Hostname: <code>${result.hostname}</code></p>` : ''}
+            ${result.started ? '<p>Tunnel is running.</p>' : ''}
+          </div>`;
+      }
+    } catch (error) {
+      console.error('Cloudflare tunnel auto-management failed:', error);
+      cloudflareStatus.innerHTML = `
+        <div class="notification is-warning">
+          <p><strong>Authentication complete, but tunnel setup failed.</strong></p>
+          <p>${error.message || 'Check the server logs for details.'}</p>
+          <p>The tunnel will be automatically configured on server restart, or you can retry from the admin dashboard.</p>
+        </div>`;
+      setupState.cloudflare.tunnelSetupComplete = false;
+    }
+  } finally {
+    setupState.cloudflare.tunnelSetupInProgress = false;
+  }
 }
 
 document.getElementById('cloudflare-next').addEventListener('click', async (event) => {

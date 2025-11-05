@@ -45,6 +45,7 @@ const importSettingsFile = document.getElementById('import-settings-file');
 const exportCloudflaredCertButton = document.getElementById('export-cloudflared-cert-button');
 const importCloudflaredCertButton = document.getElementById('import-cloudflared-cert-button');
 const importCloudflaredCertFile = document.getElementById('import-cloudflared-cert-file');
+const setupTunnelButton = document.getElementById('setup-tunnel-button');
 const connectTunnelButton = document.getElementById('connect-tunnel-button');
 const requestCertificateButton = document.getElementById('request-certificate-button');
 
@@ -1000,29 +1001,84 @@ importCloudflaredCertFile?.addEventListener('change', async (event) => {
 async function updateTunnelStatus() {
   try {
     const statusEl = document.getElementById('tunnel-status');
+    const authStatusEl = document.getElementById('tunnel-auth-status');
+    const configStatusEl = document.getElementById('tunnel-config-status');
+    const runningStatusEl = document.getElementById('tunnel-running-status');
+    const repairButton = document.getElementById('repair-tunnel-button');
+    
     if (!statusEl) return;
     
     try {
       const tunnelStatus = await getJson('/gateProxyAdmin/api/cloudflare/status');
-      let statusText = '';
       
-      if (tunnelStatus.status === 'NOT_CONFIGURED') {
-        statusText = 'Not configured';
-      } else if (tunnelStatus.status === 'NOT_AUTHENTICATED') {
+      // Update main status
+      let statusText = '';
+      let statusColor = 'muted';
+      
+      if (!settings?.cloudflare?.isAuthenticated) {
         statusText = 'Not authenticated';
+        statusColor = 'danger';
+      } else if (!settings?.cloudflare?.isConfigured) {
+        statusText = 'Authenticated, tunnel not configured';
+        statusColor = 'warning';
+      } else if (tunnelStatus.status === 'UP') {
+        statusText = `Active (${tunnelStatus.name || settings?.cloudflare?.tunnelName || 'Unknown'})`;
+        statusColor = 'success';
+      } else if (tunnelStatus.status === 'DOWN') {
+        statusText = `Configured but not running (${tunnelStatus.name || settings?.cloudflare?.tunnelName || 'Unknown'})`;
+        statusColor = 'warning';
       } else if (tunnelStatus.status) {
-        statusText = `${tunnelStatus.status} (${tunnelStatus.name || tunnelStatus.id || 'Unknown'})`;
+        statusText = `${tunnelStatus.status} (${tunnelStatus.name || settings?.cloudflare?.tunnelName || 'Unknown'})`;
+        statusColor = tunnelStatus.status === 'UP' ? 'success' : 'warning';
+      } else {
+        statusText = settings?.cloudflare?.tunnelName || 'Unknown status';
+        statusColor = 'warning';
+      }
+      
+      statusEl.textContent = statusText;
+      statusEl.style.color = `var(--${statusColor === 'success' ? 'success' : statusColor === 'danger' ? 'danger' : 'warning'})`;
+      
+      // Update detailed status
+      if (authStatusEl) {
+        authStatusEl.textContent = settings?.cloudflare?.isAuthenticated 
+          ? '✓ Authenticated with Cloudflare'
+          : '✗ Not authenticated';
+        authStatusEl.style.color = settings?.cloudflare?.isAuthenticated ? 'var(--success)' : 'var(--danger)';
+      }
+      
+      if (configStatusEl) {
+        configStatusEl.textContent = settings?.cloudflare?.isConfigured
+          ? `✓ Tunnel configured: ${settings?.cloudflare?.tunnelName || 'Unknown'}`
+          : '✗ Tunnel not configured';
+        configStatusEl.style.color = settings?.cloudflare?.isConfigured ? 'var(--success)' : 'var(--warning)';
+        
+        if (settings?.cloudflare?.hostname) {
+          configStatusEl.textContent += ` (${settings.cloudflare.hostname})`;
+        }
+      }
+      
+      if (runningStatusEl) {
+        const isRunning = settings?.cloudflare?.isRunning || tunnelStatus.isRunning;
+        runningStatusEl.textContent = isRunning
+          ? '✓ Tunnel is running'
+          : '✗ Tunnel is not running';
+        runningStatusEl.style.color = isRunning ? 'var(--success)' : 'var(--warning)';
+        
         if (tunnelStatus.connectors && tunnelStatus.connectors.length > 0) {
           const activeConnectors = tunnelStatus.connectors.filter(c => 
             c.status === 'connected' || c.status === 'healthy'
           ).length;
-          statusText += ` • ${activeConnectors}/${tunnelStatus.connectors.length} connectors`;
+          runningStatusEl.textContent += ` (${activeConnectors}/${tunnelStatus.connectors.length} connectors)`;
         }
-      } else {
-        statusText = settings?.cloudflare?.tunnelName || 'Unknown';
       }
       
-      statusEl.textContent = statusText;
+      // Show repair button if something is wrong
+      if (repairButton) {
+        const needsRepair = !settings?.cloudflare?.isAuthenticated || 
+                           !settings?.cloudflare?.isConfigured || 
+                           !settings?.cloudflare?.isRunning;
+        repairButton.style.display = needsRepair ? 'inline-block' : 'none';
+      }
       
       // Update settings object with latest status
       if (settings?.cloudflare) {
@@ -1032,9 +1088,19 @@ async function updateTunnelStatus() {
       }
     } catch (error) {
       // Fallback to basic status
-      statusEl.textContent = settings?.cloudflare?.isLinked
-        ? (settings.cloudflare.tunnelName ? `Linked (${settings.cloudflare.tunnelName})` : 'Linked')
-        : 'Unlinked';
+      statusEl.textContent = settings?.cloudflare?.isAuthenticated
+        ? (settings.cloudflare.isConfigured 
+          ? `Configured (${settings.cloudflare.tunnelName || 'Unknown'})`
+          : 'Authenticated, not configured')
+        : 'Not authenticated';
+      statusEl.style.color = 'var(--warning)';
+      
+      if (authStatusEl) {
+        authStatusEl.textContent = settings?.cloudflare?.isAuthenticated 
+          ? '✓ Authenticated'
+          : '✗ Not authenticated';
+      }
+      
       console.warn('Failed to fetch tunnel status:', error);
     }
   } catch (error) {
@@ -1044,6 +1110,59 @@ async function updateTunnelStatus() {
 
 // Auto-detect tunnel button
 const autoDetectTunnelButton = document.getElementById('auto-detect-tunnel-button');
+setupTunnelButton?.addEventListener('click', async () => {
+  try {
+    if (!settings?.cloudflare?.isLinked && !settings?.cloudflare?.tunnelName) {
+      showAlert('Make sure Cloudflare authentication is completed in the setup flow before configuring a tunnel.');
+      return;
+    }
+
+    let defaultHostname = settings?.cloudflare?.hostname || '';
+    if (!defaultHostname && settings?.site?.publicBaseUrl) {
+      try {
+        const parsed = new URL(settings.site.publicBaseUrl.includes('://')
+          ? settings.site.publicBaseUrl
+          : `https://${settings.site.publicBaseUrl}`);
+        defaultHostname = parsed.hostname;
+      } catch (error) {
+        console.warn('Failed to parse publicBaseUrl for hostname', error);
+      }
+    }
+
+    const hostnameInput = prompt('Enter the public hostname for Gate Proxy (e.g. portal.example.com):', defaultHostname || '');
+    if (!hostnameInput) return;
+
+    const hostname = hostnameInput.trim();
+    if (!hostname) {
+      showAlert('Hostname cannot be empty.');
+      return;
+    }
+
+    let tunnelName = settings?.cloudflare?.tunnelName || '';
+    if (!tunnelName) {
+      tunnelName = `gateproxy-${hostname.replace(/[^a-zA-Z0-9-]+/g, '-').replace(/-{2,}/g, '-').replace(/^-+|-+$/g, '').toLowerCase()}`;
+    }
+
+    const originalText = setupTunnelButton.textContent;
+    setupTunnelButton.disabled = true;
+    setupTunnelButton.textContent = 'Setting up...';
+
+    const result = await postJson('/gateProxyAdmin/api/cloudflare/setup', {
+      tunnelName,
+      hostname,
+      originUrl: 'http://127.0.0.1:5000'
+    });
+
+    showAlert(`Tunnel "${result.tunnel?.tunnelName || tunnelName}" configured${result.started ? ' and started' : ''}.`, 'success');
+    await loadSettings();
+    await updateTunnelStatus();
+  } catch (error) {
+    showAlert(error.message);
+  } finally {
+    setupTunnelButton.disabled = false;
+    setupTunnelButton.textContent = originalText || 'Set up tunnel';
+  }
+});
 autoDetectTunnelButton?.addEventListener('click', async () => {
   try {
     autoDetectTunnelButton.disabled = true;

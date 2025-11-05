@@ -21,7 +21,19 @@ import {
 import { requireAdmin } from '../middleware/auth.js';
 import { publicDir } from '../utils/paths.js';
 import { storeSmtpPassword } from '../services/otpService.js';
-import { hasCertificate, listTunnels, getTunnelToken, runTunnel, stopTunnel, isTunnelRunning, getTunnelInfo, autoDetectTunnel, DEFAULT_CERT_PATH } from '../services/cloudflareService.js';
+import {
+  hasCertificate,
+  listTunnels,
+  getTunnelToken,
+  runTunnel,
+  stopTunnel,
+  isTunnelRunning,
+  getTunnelInfo,
+  autoDetectTunnel,
+  DEFAULT_CERT_PATH,
+  DEFAULT_CONFIG_FILE,
+  setupTunnel
+} from '../services/cloudflareService.js';
 import { getCertificateStatus, requestCertificate } from '../services/certService.js';
 
 const router = Router();
@@ -142,11 +154,18 @@ router.get('/gateProxyAdmin/api/settings', requireAdmin, async (req, res) => {
     cloudflare: {
       tunnelName: config.cloudflare.tunnelName,
       credentialFile: config.cloudflare.credentialFile,
-      isLinked: hasCertificate(),
+      configFile: config.cloudflare.configFile,
+      hostname: config.cloudflare.hostname,
+      originUrl: config.cloudflare.originUrl,
+      accountTag: config.cloudflare.accountTag,
+      isAuthenticated: hasCertificate(),
+      isConfigured: !!(config.cloudflare?.tunnelName && config.cloudflare.tunnelName !== 'linuxGateProxy'),
       isRunning: isTunnelRunning(),
       status: tunnelStatus?.status || null,
       tunnelId: tunnelStatus?.id || null,
-      connectors: tunnelStatus?.connectors || []
+      connectors: tunnelStatus?.connectors || [],
+      // Legacy field for backwards compatibility
+      isLinked: hasCertificate()
     },
     certificate: certStatus
   });
@@ -591,6 +610,158 @@ router.post('/gateProxyAdmin/api/cloudflare/connect', requireAdmin, async (req, 
 
     res.json({ success: true, tunnel: { name: tunnelName, ...token }, running: isTunnelRunning() });
   } catch (error) {
+    next(error);
+  }
+});
+
+router.post('/gateProxyAdmin/api/cloudflare/auto-manage', requireAdmin, async (req, res, next) => {
+  try {
+    const config = loadConfig();
+    const listenPort = Number(config.site?.listenPort) || 5000;
+    const originUrl = `http://127.0.0.1:${listenPort}`;
+    
+    let { hostname } = req.body;
+    
+    // Extract hostname from publicBaseUrl if not provided
+    if (!hostname) {
+      const publicBaseUrl = config.site?.publicBaseUrl?.trim();
+      if (publicBaseUrl) {
+        try {
+          const parsed = new URL(publicBaseUrl.includes('://') ? publicBaseUrl : `https://${publicBaseUrl}`);
+          hostname = parsed.hostname;
+          logger.info('Extracted hostname from publicBaseUrl for admin auto-manage', { hostname });
+        } catch (urlError) {
+          logger.warn('Failed to parse publicBaseUrl for hostname', { publicBaseUrl, error: urlError.message });
+        }
+      }
+    }
+    
+    logger.info('Admin requested Cloudflare tunnel auto-management', { hostname: hostname || 'not provided' });
+    
+    const result = await autoManageTunnel({ hostname, originUrl });
+    
+    if (result.status === 'SKIPPED' || result.status === 'FAILED') {
+      return res.status(400).json(result);
+    }
+    
+    // Save tunnel configuration
+    const updatedConfig = loadConfig();
+    saveConfigSection('cloudflare', {
+      ...updatedConfig.cloudflare,
+      tunnelName: result.tunnelName,
+      credentialFile: result.credentialFile || updatedConfig.cloudflare?.credentialFile || '',
+      accountTag: result.accountTag || updatedConfig.cloudflare?.accountTag || '',
+      certPem: updatedConfig.cloudflare?.certPem || '',
+      configFile: result.configFile || updatedConfig.cloudflare?.configFile || '',
+      hostname: result.hostname || updatedConfig.cloudflare?.hostname || '',
+      originUrl: result.originUrl || originUrl,
+      tunnelId: result.tunnelId || updatedConfig.cloudflare?.tunnelId || ''
+    });
+    
+    let started = false;
+    if (result.configFile && fs.existsSync(result.configFile)) {
+      try {
+        await runTunnel(result.tunnelName, {
+          configFile: result.configFile
+        });
+        started = true;
+        logger.info('Cloudflare tunnel started after admin auto-management', {
+          tunnelName: result.tunnelName
+        });
+      } catch (tunnelError) {
+        logger.warn('Cloudflare tunnel auto-management completed but failed to start', {
+          error: tunnelError.message
+        });
+      }
+    }
+    
+    res.json({
+      ...result,
+      started
+    });
+  } catch (error) {
+    logger.error('Cloudflare tunnel auto-management via admin failed', { error: error.message });
+    next(error);
+  }
+});
+
+router.post('/gateProxyAdmin/api/cloudflare/setup', requireAdmin, async (req, res, next) => {
+  try {
+    const config = loadConfig();
+    const listenPort = Number(config.site?.listenPort) || 5000;
+
+    let { tunnelName, hostname, originUrl } = req.body;
+    hostname = (hostname || '').trim();
+
+    logger.info('Admin requested Cloudflare tunnel setup', {
+      requestedTunnelName: tunnelName,
+      requestedHostname: hostname,
+      requestedOrigin: originUrl
+    });
+
+    if (!hostname) {
+      const publicBaseUrl = config.site?.publicBaseUrl?.trim();
+      if (publicBaseUrl) {
+        try {
+          const parsed = new URL(publicBaseUrl.includes('://') ? publicBaseUrl : `https://${publicBaseUrl}`);
+          hostname = parsed.hostname;
+        } catch (urlError) {
+          logger.warn('Failed to parse publicBaseUrl for tunnel hostname', { publicBaseUrl, error: urlError.message });
+        }
+      }
+    }
+
+    if (!hostname) {
+      return res.status(400).json({ error: 'Hostname is required to configure a tunnel. Provide a hostname in the request or set the public URL under Portal settings.' });
+    }
+
+    if (!originUrl || !originUrl.trim()) {
+      originUrl = config.cloudflare?.originUrl || `http://127.0.0.1:${listenPort}`;
+    }
+
+    if (!tunnelName || !tunnelName.trim()) {
+      tunnelName = `gateproxy-${hostname.replace(/[^a-zA-Z0-9-]+/g, '-').replace(/-{2,}/g, '-').replace(/^-+|-+$/g, '').toLowerCase()}`;
+    }
+
+    const setupResult = await setupTunnel({ tunnelName, hostname, originUrl });
+
+    const updatedConfig = loadConfig();
+    saveConfigSection('cloudflare', {
+      ...updatedConfig.cloudflare,
+      tunnelName: setupResult.tunnelName,
+      credentialFile: setupResult.credentialFile || updatedConfig.cloudflare?.credentialFile || '',
+      accountTag: setupResult.accountTag || updatedConfig.cloudflare?.accountTag || '',
+      certPem: updatedConfig.cloudflare?.certPem || '',
+      configFile: setupResult.configFile || DEFAULT_CONFIG_FILE,
+      hostname: setupResult.hostname,
+      originUrl: setupResult.originUrl,
+      tunnelId: setupResult.tunnelId || updatedConfig.cloudflare?.tunnelId || ''
+    });
+
+    let started = false;
+    try {
+      await runTunnel(setupResult.tunnelName, {
+        configFile: setupResult.configFile || DEFAULT_CONFIG_FILE
+      });
+      started = true;
+      logger.info('Cloudflare tunnel started after admin setup', {
+        tunnelName: setupResult.tunnelName
+      });
+    } catch (tunnelError) {
+      logger.warn('Cloudflare tunnel setup completed but failed to start automatically', {
+        error: tunnelError.message
+      });
+    }
+
+    res.json({
+      success: true,
+      tunnel: setupResult,
+      started,
+      hostname: setupResult.hostname,
+      originUrl: setupResult.originUrl
+    });
+  } catch (error) {
+    logger.error('Cloudflare tunnel setup via admin failed', { error: error.message });
     next(error);
   }
 });

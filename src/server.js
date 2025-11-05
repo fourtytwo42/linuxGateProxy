@@ -20,7 +20,7 @@ import { handleProxy, upgradeProxy } from './services/proxyService.js';
 import * as certService from './services/certService.js';
 import { purgeExpiredOtps } from './services/otpService.js';
 import { logger } from './utils/logger.js';
-import { runTunnel, stopTunnel, hasCertificate, autoDetectTunnel, getTunnelToken } from './services/cloudflareService.js';
+import { hasCertificate } from './services/cloudflareService.js';
 
 const scriptsDir = path.join(projectRoot, 'scripts');
 
@@ -391,53 +391,99 @@ async function startServer() {
   server.listen(endpoint.port, endpoint.address, () => {
     logger.info('Server listening', { listenAddress: endpoint.address, listenPort: endpoint.port });
     
-    // Start Cloudflare tunnel if configured or auto-detect
+    // Automatically manage Cloudflare tunnel
     (async () => {
       try {
         const config = loadConfig();
-        let tunnelName = config.cloudflare?.tunnelName;
+        const listenPort = Number(config.site?.listenPort) || 5000;
+        const originUrl = `http://127.0.0.1:${listenPort}`;
         
-        // If no tunnel configured and certificate exists, try auto-detection
-        if ((!tunnelName || tunnelName === 'linuxGateProxy') && hasCertificate()) {
-          logger.info('No tunnel configured, attempting auto-detection...');
+        if (!hasCertificate()) {
+          logger.info('Cloudflare certificate not found - skipping automatic tunnel management');
+          return;
+        }
+        
+        logger.info('Starting automatic Cloudflare tunnel management');
+        
+        // Import autoManageTunnel here to avoid circular dependency
+        const { autoManageTunnel } = await import('./services/cloudflareService.js');
+        
+        // Extract hostname from publicBaseUrl if available
+        let hostname = null;
+        const publicBaseUrl = config.site?.publicBaseUrl?.trim();
+        if (publicBaseUrl) {
           try {
-            const detected = await autoDetectTunnel();
-            if (detected) {
-              logger.info(`Auto-detected tunnel: ${detected.name} (${detected.id})`);
-              // Get credentials for the tunnel
-              const token = await getTunnelToken(detected.name);
-              // Save the configuration
-              saveConfigSection('cloudflare', {
-                ...config.cloudflare,
-                tunnelName: detected.name,
-                credentialFile: token.credentialFile || '',
-                accountTag: token.AccountTag || '',
-                certPem: token.certPem || ''
-              });
-              tunnelName = detected.name;
-            } else {
-              logger.info('No tunnels found for auto-detection.');
-            }
-          } catch (autoDetectError) {
-            logger.warn('Failed to auto-detect tunnel', { error: autoDetectError.message });
+            const parsed = new URL(publicBaseUrl.includes('://') ? publicBaseUrl : `https://${publicBaseUrl}`);
+            hostname = parsed.hostname;
+            logger.info('Using hostname from publicBaseUrl for tunnel', { hostname });
+          } catch (urlError) {
+            logger.warn('Failed to parse publicBaseUrl', { publicBaseUrl, error: urlError.message });
           }
         }
         
-        // Start tunnel if we have a valid tunnel name
-        if (tunnelName && 
-            tunnelName !== 'linuxGateProxy' && 
-            hasCertificate()) {
-          logger.info(`Starting Cloudflare tunnel: ${tunnelName}`);
-          await runTunnel(tunnelName).catch((error) => {
-            logger.warn(`Failed to start Cloudflare tunnel: ${error.message}`);
+        const result = await autoManageTunnel({ hostname, originUrl });
+        
+        if (result.status === 'SKIPPED') {
+          logger.info('Tunnel management skipped', { reason: result.reason });
+          return;
+        }
+        
+        if (result.status === 'FAILED') {
+          logger.error('Automatic tunnel management failed', { 
+            reason: result.reason,
+            error: result.error 
           });
-        } else if (!hasCertificate()) {
-          logger.info('Cloudflare certificate not found. Run cloudflared login first or configure via admin panel.');
-        } else {
-          logger.info('No Cloudflare tunnel configured. Configure via admin panel.');
+          return;
+        }
+        
+        // Save tunnel configuration
+        if (result.tunnelName) {
+          logger.info('Saving tunnel configuration', {
+            tunnelName: result.tunnelName,
+            hostname: result.hostname,
+            action: result.action
+          });
+          
+          saveConfigSection('cloudflare', {
+            ...config.cloudflare,
+            tunnelName: result.tunnelName,
+            credentialFile: result.credentialFile || config.cloudflare?.credentialFile || '',
+            accountTag: result.accountTag || config.cloudflare?.accountTag || '',
+            certPem: config.cloudflare?.certPem || '',
+            configFile: result.configFile || config.cloudflare?.configFile || '',
+            hostname: result.hostname || config.cloudflare?.hostname || '',
+            originUrl: result.originUrl || originUrl,
+            tunnelId: result.tunnelId || config.cloudflare?.tunnelId || ''
+          });
+          
+          // Start the tunnel if we have a config file
+          if (result.configFile && fs.existsSync(result.configFile)) {
+            logger.info('Starting Cloudflare tunnel', { 
+              tunnelName: result.tunnelName,
+              configFile: result.configFile 
+            });
+            
+            await runTunnel(result.tunnelName, {
+              configFile: result.configFile
+            }).catch((error) => {
+              logger.warn('Failed to start Cloudflare tunnel automatically', { 
+                error: error.message,
+                tunnelName: result.tunnelName 
+              });
+            });
+          } else {
+            logger.info('Tunnel configured but no config file - will start on next check', {
+              tunnelName: result.tunnelName
+            });
+          }
+        } else if (result.status === 'PARTIAL') {
+          logger.warn('Tunnel partially configured', { 
+            reason: result.reason,
+            tunnelName: result.tunnelName 
+          });
         }
       } catch (error) {
-        logger.warn('Error starting Cloudflare tunnel', { error: error.message });
+        logger.error('Error in automatic tunnel management', { error: error.message, stack: error.stack });
       }
     })();
   });

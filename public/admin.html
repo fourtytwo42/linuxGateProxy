@@ -190,14 +190,18 @@
                 <div class="integration-card">
                   <header>
                     <h4>Cloudflare Tunnel</h4>
-                    <p>Keep your deployment paired with the correct tunnel endpoint.</p>
+                    <p>Tunnel is automatically managed - connects to existing or creates new tunnel.</p>
                   </header>
-                  <p class="integration-status">Status: <span id="tunnel-status">Checking...</span></p>
-                  <div style="display: flex; gap: 0.5rem; flex-wrap: wrap; margin-bottom: 0.5rem;">
-                    <button class="button is-success" id="auto-detect-tunnel-button">Auto-detect tunnel</button>
-                    <button class="button is-link" id="connect-tunnel-button">Connect to existing tunnel</button>
+                  <div id="tunnel-status-container">
+                    <p class="integration-status">Status: <span id="tunnel-status">Checking...</span></p>
+                    <div id="tunnel-details" style="margin-top: 0.5rem; font-size: 0.875rem; color: var(--text-muted);">
+                      <div id="tunnel-auth-status"></div>
+                      <div id="tunnel-config-status"></div>
+                      <div id="tunnel-running-status"></div>
+                    </div>
                   </div>
-                  <div style="display: flex; gap: 0.5rem; flex-wrap: wrap;">
+                  <div style="display: flex; gap: 0.5rem; flex-wrap: wrap; margin-top: 1rem;">
+                    <button class="button is-link" id="repair-tunnel-button" style="display: none;">Repair tunnel</button>
                     <button class="button is-outline" id="export-cloudflared-cert-button">Export Cert</button>
                     <button class="button is-outline" id="import-cloudflared-cert-button">Import Cert</button>
                     <input type="file" id="import-cloudflared-cert-file" accept=".pem,.txt" style="display: none;" />

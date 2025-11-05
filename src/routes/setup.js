@@ -17,7 +17,11 @@ import {
   getTunnelToken,
   createTunnel,
   hasCertificate,
-  DEFAULT_CERT_PATH
+  DEFAULT_CERT_PATH,
+  DEFAULT_CONFIG_FILE,
+  setupTunnel,
+  runTunnel,
+  autoManageTunnel
 } from '../services/cloudflareService.js';
 
 import { storeSmtpPassword } from '../services/otpService.js';
@@ -536,6 +540,167 @@ router.post('/api/setup/cloudflare/create', async (req, res, next) => {
     });
 
     res.json({ success: true, tunnel });
+  } catch (error) {
+    next(error);
+  }
+});
+
+router.post('/api/setup/cloudflare/auto-manage', async (req, res, next) => {
+  try {
+    const config = loadConfig();
+    const listenPort = Number(config.site?.listenPort) || 5000;
+    const originUrl = `http://127.0.0.1:${listenPort}`;
+    
+    let { hostname } = req.body;
+    
+    // Extract hostname from publicBaseUrl if not provided
+    if (!hostname) {
+      const publicBaseUrl = config.site?.publicBaseUrl?.trim();
+      if (publicBaseUrl) {
+        try {
+          const parsed = new URL(publicBaseUrl.includes('://') ? publicBaseUrl : `https://${publicBaseUrl}`);
+          hostname = parsed.hostname;
+          logger.info('Extracted hostname from publicBaseUrl for auto-manage', { hostname });
+        } catch (urlError) {
+          logger.warn('Failed to parse publicBaseUrl for hostname', { publicBaseUrl, error: urlError.message });
+        }
+      }
+    }
+    
+    logger.info('Auto-managing Cloudflare tunnel', { hostname: hostname || 'not provided' });
+    
+    const result = await autoManageTunnel({ hostname, originUrl });
+    
+    if (result.status === 'SKIPPED' || result.status === 'FAILED') {
+      return res.status(400).json(result);
+    }
+    
+    // Save tunnel configuration
+    const updatedConfig = loadConfig();
+    saveConfigSection('cloudflare', {
+      ...updatedConfig.cloudflare,
+      tunnelName: result.tunnelName,
+      credentialFile: result.credentialFile || updatedConfig.cloudflare?.credentialFile || '',
+      accountTag: result.accountTag || updatedConfig.cloudflare?.accountTag || '',
+      certPem: updatedConfig.cloudflare?.certPem || '',
+      configFile: result.configFile || updatedConfig.cloudflare?.configFile || '',
+      hostname: result.hostname || updatedConfig.cloudflare?.hostname || '',
+      originUrl: result.originUrl || originUrl,
+      tunnelId: result.tunnelId || updatedConfig.cloudflare?.tunnelId || ''
+    });
+    
+    let started = false;
+    if (result.configFile && fs.existsSync(result.configFile)) {
+      try {
+        await runTunnel(result.tunnelName, {
+          configFile: result.configFile
+        });
+        started = true;
+        logger.info('Cloudflare tunnel started after auto-management', {
+          tunnelName: result.tunnelName
+        });
+      } catch (tunnelError) {
+        logger.warn('Cloudflare tunnel auto-management completed but failed to start', {
+          error: tunnelError.message
+        });
+      }
+    }
+    
+    res.json({
+      ...result,
+      started
+    });
+  } catch (error) {
+    next(error);
+  }
+});
+
+router.post('/api/setup/cloudflare/setup-tunnel', async (req, res, next) => {
+  try {
+    const config = loadConfig();
+    const listenPort = Number(config.site?.listenPort) || 5000;
+
+    let { tunnelName, hostname, originUrl } = req.body;
+    hostname = (hostname || '').trim();
+
+    logger.info('Setup wizard requested Cloudflare tunnel configuration', {
+      requestedTunnelName: tunnelName,
+      requestedHostname: hostname,
+      requestedOrigin: originUrl
+    });
+
+    if (!hostname) {
+      const publicBaseUrl = config.site?.publicBaseUrl?.trim();
+      if (publicBaseUrl) {
+        try {
+          const parsed = new URL(publicBaseUrl.includes('://') ? publicBaseUrl : `https://${publicBaseUrl}`);
+          hostname = parsed.hostname;
+        } catch (urlError) {
+          logger.warn('Failed to parse publicBaseUrl for tunnel hostname', { publicBaseUrl, error: urlError.message });
+        }
+      }
+    }
+
+    if (!hostname) {
+      return res.status(400).json({ error: 'Hostname is required to configure the Cloudflare tunnel. Set a public URL or provide hostname manually.' });
+    }
+
+    if (!originUrl || !originUrl.trim()) {
+      originUrl = `http://127.0.0.1:${listenPort}`;
+    }
+
+    if (!tunnelName || !tunnelName.trim()) {
+      tunnelName = `gateproxy-${hostname.replace(/[^a-zA-Z0-9-]+/g, '-').replace(/-{2,}/g, '-').replace(/^-+|-+$/g, '').toLowerCase()}`;
+    }
+
+    const setupResult = await setupTunnel({
+      tunnelName,
+      hostname,
+      originUrl
+    });
+
+    logger.info('Cloudflare tunnel configured via setup wizard', {
+      tunnelName: setupResult.tunnelName,
+      hostname: setupResult.hostname,
+      originUrl: setupResult.originUrl
+    });
+
+    const updatedConfig = loadConfig();
+
+    saveConfigSection('cloudflare', {
+      ...updatedConfig.cloudflare,
+      tunnelName: setupResult.tunnelName,
+      credentialFile: setupResult.credentialFile || updatedConfig.cloudflare?.credentialFile || '',
+      accountTag: setupResult.accountTag || updatedConfig.cloudflare?.accountTag || '',
+      certPem: updatedConfig.cloudflare?.certPem || '',
+      configFile: setupResult.configFile || DEFAULT_CONFIG_FILE,
+      hostname: setupResult.hostname,
+      originUrl: setupResult.originUrl,
+      tunnelId: setupResult.tunnelId || updatedConfig.cloudflare?.tunnelId || ''
+    });
+
+    let started = false;
+    try {
+      await runTunnel(setupResult.tunnelName, {
+        configFile: setupResult.configFile || DEFAULT_CONFIG_FILE
+      });
+      started = true;
+      logger.info('Cloudflare tunnel started after setup wizard configuration', {
+        tunnelName: setupResult.tunnelName
+      });
+    } catch (tunnelError) {
+      logger.warn('Cloudflare tunnel setup completed but failed to start automatically', {
+        error: tunnelError.message
+      });
+    }
+
+    res.json({
+      success: true,
+      tunnel: setupResult,
+      started,
+      hostname: setupResult.hostname,
+      originUrl: setupResult.originUrl
+    });
   } catch (error) {
     next(error);
   }
