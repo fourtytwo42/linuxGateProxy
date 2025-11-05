@@ -1,5 +1,4 @@
 import httpProxy from 'http-proxy';
-import { Transform } from 'stream';
 import { loadConfig } from '../config/index.js';
 import { logger } from '../utils/logger.js';
 import { userHasGroup } from './ldapService.js';
@@ -46,93 +45,6 @@ proxy.on('proxyRes', (proxyRes, req, res) => {
     statusMessage: proxyRes.statusMessage,
     contentType: proxyRes.headers['content-type']
   });
-  
-  // Inject admin overlay script for HTML responses if user is admin
-  const contentType = proxyRes.headers['content-type'] || '';
-  if (contentType.includes('text/html') && req.auth?.isAdmin) {
-    logger.debug('Injecting admin overlay for HTML response', { url: req.url });
-    
-    // Pause the stream immediately to prevent automatic piping
-    proxyRes.pause();
-    
-    // Remove content-encoding header since we'll modify the body
-    delete proxyRes.headers['content-encoding'];
-    delete proxyRes.headers['Content-Encoding'];
-    delete proxyRes.headers['transfer-encoding'];
-    delete proxyRes.headers['Transfer-Encoding'];
-    
-    // Copy headers to response (except content-length which we'll update)
-    res.statusCode = proxyRes.statusCode;
-    res.statusMessage = proxyRes.statusMessage;
-    Object.keys(proxyRes.headers).forEach((key) => {
-      if (key.toLowerCase() !== 'content-length' && 
-          key.toLowerCase() !== 'content-encoding' &&
-          key.toLowerCase() !== 'transfer-encoding') {
-        res.setHeader(key, proxyRes.headers[key]);
-      }
-    });
-    
-    // Use a transform stream to collect and modify the body
-    let bodyBuffer = Buffer.alloc(0);
-    
-    const transform = new Transform({
-      transform(chunk, encoding, callback) {
-        // Collect all chunks
-        bodyBuffer = Buffer.concat([bodyBuffer, chunk]);
-        callback();
-      },
-      flush(callback) {
-        try {
-          const body = bodyBuffer.toString('utf8');
-          
-          // Inject admin overlay script before </body> or at end if no body tag
-          const overlayScript = `
-<script>
-window.GateProxyAdminOverlay = true;
-</script>
-<script src="/assets/js/admin-overlay.js"></script>`;
-          
-          let modifiedBody = body;
-          if (body.includes('</body>')) {
-            modifiedBody = body.replace('</body>', overlayScript + '\n</body>');
-          } else if (body.includes('</html>')) {
-            modifiedBody = body.replace('</html>', overlayScript + '\n</html>');
-          } else {
-            modifiedBody = body + overlayScript;
-          }
-          
-          // Update content length
-          const newBody = Buffer.from(modifiedBody, 'utf8');
-          res.setHeader('Content-Length', newBody.length);
-          
-          // Push the modified body
-          this.push(newBody);
-          callback();
-        } catch (error) {
-          logger.error('Error injecting admin overlay', { error: error.message });
-          // Push original body on error
-          this.push(bodyBuffer);
-          callback();
-        }
-      }
-    });
-    
-    // Set up error handlers
-    transform.on('error', (error) => {
-      logger.error('Transform stream error', { error: error.message });
-      res.statusCode = 500;
-      res.end('Internal server error');
-    });
-    
-    res.on('error', (error) => {
-      logger.error('Response stream error', { error: error.message });
-      proxyRes.destroy();
-    });
-    
-    // Pipe proxyRes through transform to res, then resume proxyRes
-    proxyRes.pipe(transform).pipe(res);
-    proxyRes.resume();
-  }
 });
 
 export function proxyRequest(req, res, next, target) {
