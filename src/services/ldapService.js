@@ -547,10 +547,29 @@ export async function validateCredentials(userDn, password, configOverride) {
   const client = createClient(config);
   try {
     await client.bind(userDn, password);
+    logger.debug('Credential validation successful', { userDn });
     return true;
   } catch (error) {
-    logger.warn('Credential validation failed', { userDn, error: error.message });
-    return false;
+    // Parse the error to provide better feedback
+    const errorCode = error.code;
+    const errorMessage = parseLdapError(error);
+    
+    // Log more details for debugging
+    logger.warn('Credential validation failed', { 
+      userDn, 
+      error: error.message,
+      errorCode,
+      parsedError: errorMessage
+    });
+    
+    // If it's an invalid credentials error (0x31/49), return false
+    // Otherwise, re-throw to surface connection issues
+    if (errorCode === 49 || errorCode === '0x31' || error.message?.includes('52e')) {
+      return false;
+    }
+    
+    // For other errors, re-throw to indicate connection/auth issues
+    throw new Error(`LDAP authentication error: ${errorMessage}`);
   } finally {
     await client.unbind().catch(() => {});
   }
