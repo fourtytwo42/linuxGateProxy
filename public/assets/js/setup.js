@@ -832,7 +832,19 @@ siteForm.addEventListener('submit', async (event) => {
 
     await postJson('/api/setup/smtp', smtpPayload);
 
-    showStep(3);
+    // Skip step 4 (helper scripts) - go directly to Cloudflare (step 5)
+    // Check if Cloudflare is already authenticated
+    try {
+      const cloudflareCheck = await getJson('/api/setup/cloudflare/check');
+      if (cloudflareCheck.authenticated) {
+        setupState.cloudflare = { configured: true };
+        showStep(6); // Skip to resources
+      } else {
+        showStep(5); // Show Cloudflare step
+      }
+    } catch (cloudflareError) {
+      showStep(5); // Show Cloudflare step if check fails
+    }
   } catch (error) {
     showAlert(error.message);
   }
