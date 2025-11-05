@@ -433,14 +433,14 @@ function renderStatusCards() {
     }
   }
 
-  const cards = [
-    { title: 'Public URL', value: settings.site.publicBaseUrl || 'Not configured' },
-    { title: 'LDAP Connection', value: ldapStatus },
-    { title: 'Cloudflare Tunnel', value: tunnelStatus },
-    { title: 'SSL Certificate', value: certStatusText },
-    { title: 'Certificate Authority', value: caStatusText },
-    { title: 'Resources', value: `${resources.length} configured` }
-  ];
+      const cards = [
+        { title: 'Public URL', value: settings.site.publicBaseUrl || 'Not configured' },
+        { title: 'LDAP Connection', value: ldapStatus },
+        { title: 'Cloudflare Tunnel', value: tunnelStatus },
+        { title: 'SSL Certificate (Optional)', value: certStatusText },
+        { title: 'Certificate Authority (Optional)', value: caStatusText },
+        { title: 'Resources', value: `${resources.length} configured` }
+      ];
 
   cards.forEach((card) => {
     const wrapper = document.createElement('article');

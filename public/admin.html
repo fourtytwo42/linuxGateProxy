@@ -66,36 +66,16 @@
             <article class="panel">
               <header class="panel-header">
                 <div>
-                  <h3>Setup Automation</h3>
-                  <p>Guided scripts to extend your domain and certificate infrastructure.</p>
+                  <h3>Setup Automation (Optional)</h3>
+                  <p>Optional scripts to configure certificate infrastructure. Domain controller schema is configured during initial setup.</p>
                 </div>
               </header>
 
               <div class="script-grid">
                 <article class="script-card">
                   <header>
-                    <h4>Domain Controller Schema Update</h4>
-                    <p>Extend Active Directory with GateProxy attributes using Schema Admin rights.</p>
-                  </header>
-                  <div class="script-actions">
-                    <a href="/share/configure-domain-controller.zip" class="button is-link" download>
-                      <span aria-hidden="true">⬇</span>
-                      <span>configure-domain-controller.zip</span>
-                    </a>
-                    <p class="help">Includes auto-elevating <code>.bat</code> and PowerShell scripts.</p>
-                  </div>
-                  <ol class="script-steps">
-                    <li>Download and extract on the Schema Master DC.</li>
-                    <li>Run <code>configure-domain-controller.bat</code> (auto-elevates) or the PowerShell script.</li>
-                    <li>Use an account in <em>Schema Admins</em>; the script runs with current credentials.</li>
-                    <li>Allow the schema update to complete without additional prompts.</li>
-                  </ol>
-                </article>
-
-                <article class="script-card">
-                  <header>
-                    <h4>Certificate Authority Configuration</h4>
-                    <p>Prepare AD CS for automatic certificate issuance and enrollment.</p>
+                    <h4>Certificate Authority Configuration <span class="badge badge-neutral">Optional</span></h4>
+                    <p>Prepare AD CS for automatic certificate issuance and enrollment. This is optional - GateProxy works without it.</p>
                   </header>
                   <div class="script-actions">
                     <a href="/share/configure-certificate-server.zip" class="button is-link" download>
@@ -116,6 +96,7 @@
               <div class="callout warning">
                 <h4>Operational notes</h4>
                 <ul>
+                  <li>SSL certificate and certificate authority setup are <strong>optional</strong>. GateProxy will work without them.</li>
                   <li>Run scripts with appropriate elevated privileges on target servers.</li>
                   <li>Ensure Active Directory and required Windows roles are already installed.</li>
                   <li><code>.bat</code> files auto-elevate; PowerShell scripts remain available for manual execution.</li>
@@ -225,8 +206,8 @@
 
                 <div class="integration-card">
                   <header>
-                    <h4>Certificate Lifecycle</h4>
-                    <p>Automate enrollment from your enterprise CA.</p>
+                    <h4>Certificate Lifecycle <span class="badge badge-neutral">Optional</span></h4>
+                    <p>Automate enrollment from your enterprise CA. SSL certificates are optional - GateProxy works without them.</p>
                   </header>
                   <ul class="cert-status">
                     <li><strong>Certificate Status:</strong> <span id="cert-status-text">Checking...</span></li>
@@ -234,7 +215,7 @@
                     <li><strong>Internal Hostname:</strong> <span id="cert-hostname-text">-</span></li>
                   </ul>
                   <button class="button is-link" id="request-certificate-button">Request certificate</button>
-                  <p class="help">Requires the certificate server to be configured and reachable.</p>
+                  <p class="help">SSL certificates are optional. This feature requires the certificate server to be configured and reachable.</p>
                 </div>
 
                 <div class="integration-card">
