@@ -403,12 +403,10 @@ router.post('/api/setup/smtp', (req, res) => {
 
 
 router.post('/api/setup/proxy', (req, res) => {
-  const { targetHost, resources = [] } = req.body;
-  if (!targetHost) {
-    return res.status(400).json({ error: 'targetHost is required' });
-  }
+  const { targetHost = '', resources = [] } = req.body;
+  // targetHost is optional - user can skip and configure later
   saveConfigSection('proxy', {
-    targetHost,
+    targetHost: targetHost || '',
     resources
   });
   resources.forEach((resource) => {
