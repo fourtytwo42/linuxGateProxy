@@ -342,12 +342,12 @@ router.post('/api/setup/ldap', async (req, res, next) => {
 
 router.post('/api/setup/site', (req, res) => {
   const {
-    listenAddress = '127.0.0.1',
+    listenAddress = '0.0.0.0',
     listenPort = 5000,
-    publicBaseUrl,
+    publicBaseUrl = '',
     sessionHours = 8,
-    enableOtp = true,
-    enableWebAuthn = true
+    enableOtp = false,
+    enableWebAuthn = false
   } = req.body;
 
   const existingSite = loadConfig().site;
