@@ -89,7 +89,100 @@ async function bindServiceAccount(client, config, passwordOverride) {
   if (!config.auth.lookupUser || !password) {
     throw new Error('Service account credentials are not configured.');
   }
-  await client.bind(config.auth.lookupUser, password);
+  
+  const lookupUser = config.auth.lookupUser.trim();
+  
+  // Generate username formats to try - same logic as testServiceBind
+  const usernameFormats = [];
+  usernameFormats.push(lookupUser); // Always try the input as-is first
+  
+  // Parse the input to extract username and domain parts
+  let usernamePart = lookupUser;
+  let domainPart = null;
+  
+  if (lookupUser.includes('@')) {
+    // UPN format: username@domain.com
+    const parts = lookupUser.split('@');
+    usernamePart = parts[0];
+    domainPart = parts.slice(1).join('@');
+  } else if (lookupUser.includes('\\')) {
+    // Domain\username format
+    const parts = lookupUser.split('\\');
+    if (parts.length >= 2) {
+      domainPart = parts[0];
+      usernamePart = parts.slice(1).join('\\');
+    }
+  }
+  
+  // If we extracted a domain, try variations with the configured domain
+  if (config.auth.domain && domainPart !== config.auth.domain) {
+    // Try with configured domain instead of extracted domain
+    usernameFormats.push(`${usernamePart}@${config.auth.domain}`);
+    
+    const domainNetbios = config.auth.domain.split('.')[0].toUpperCase();
+    usernameFormats.push(`${domainNetbios}\\${usernamePart}`);
+    usernameFormats.push(`${config.auth.domain.split('.')[0].toLowerCase()}\\${usernamePart}`);
+  }
+  
+  // If input was plain username, try all formats
+  if (!lookupUser.includes('@') && !lookupUser.includes('\\')) {
+    // Plain username - try all variants
+    if (config.auth.domain) {
+      usernameFormats.push(`${lookupUser}@${config.auth.domain}`);
+      
+      const domainNetbios = config.auth.domain.split('.')[0].toUpperCase();
+      usernameFormats.push(`${domainNetbios}\\${lookupUser}`);
+      usernameFormats.push(`${config.auth.domain.split('.')[0].toLowerCase()}\\${lookupUser}`);
+    }
+  } else if (domainPart) {
+    // If input had domain, also try plain username (in case domain was wrong)
+    usernameFormats.push(usernamePart);
+    
+    // And try with configured domain
+    if (config.auth.domain) {
+      usernameFormats.push(`${usernamePart}@${config.auth.domain}`);
+      
+      const domainNetbios = config.auth.domain.split('.')[0].toUpperCase();
+      usernameFormats.push(`${domainNetbios}\\${usernamePart}`);
+      usernameFormats.push(`${config.auth.domain.split('.')[0].toLowerCase()}\\${usernamePart}`);
+    }
+  }
+  
+  // Remove duplicates while preserving order
+  const uniqueFormats = [];
+  const seen = new Set();
+  for (const format of usernameFormats) {
+    if (!seen.has(format)) {
+      seen.add(format);
+      uniqueFormats.push(format);
+    }
+  }
+  
+  logger.debug('Trying service account bind formats', { formats: uniqueFormats, original: lookupUser });
+  
+  // Try each format until one succeeds
+  let lastError = null;
+  for (const format of uniqueFormats) {
+    try {
+      await client.bind(format, password);
+      logger.debug('Service account bind successful', { format });
+      return; // Success!
+    } catch (error) {
+      lastError = error;
+      logger.debug('Service account bind failed with format, trying next', { 
+        format, 
+        error: error.message 
+      });
+      // Continue to next format
+    }
+  }
+  
+  // All formats failed
+  logger.error('Service account bind failed with all formats', { 
+    formats: uniqueFormats, 
+    lastError: lastError?.message 
+  });
+  throw new Error(`Service account authentication failed: ${lastError?.message || 'All username formats failed'}`);
 }
 
 export function parseLdapError(error) {
