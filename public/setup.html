@@ -188,74 +188,116 @@
         <form id="step-3" class="setup-step" data-step-index="3">
           <header class="step-header">
             <span class="step-pill" data-step-label></span>
-            <h2>Pick how the portal behaves</h2>
-            <p>These settings control how teammates reach Gate Proxy.</p>
+            <h2>Server setup</h2>
+            <p>Configure how Gate Proxy listens for connections and manages sessions.</p>
           </header>
 
-          <div class="step-body two-column">
+          <div class="step-body">
             <fieldset>
-              <legend>Server basics</legend>
+              <legend>Server configuration</legend>
               <label>
                 <span>Listen address</span>
-                <input name="listenAddress" value="127.0.0.1" />
+                <input name="listenAddress" value="0.0.0.0" placeholder="0.0.0.0" />
+                <small class="muted small">0.0.0.0 listens on all network interfaces</small>
               </label>
               <label>
                 <span>Listen port</span>
-                <input name="listenPort" type="number" value="5000" />
+                <input name="listenPort" type="number" value="5000" placeholder="5000" />
+                <small class="muted small">Port number for HTTP connections</small>
               </label>
               <label>
-                <span>Public base URL</span>
+                <span>Public base URL (optional)</span>
                 <input name="publicBaseUrl" placeholder="https://portal.example.com" />
+                <small class="muted small">The public URL users will access Gate Proxy from</small>
               </label>
               <label>
                 <span>Session time (hours)</span>
-                <input name="sessionHours" type="number" value="8" />
-              </label>
-              <label class="checkbox-row">
-                <input type="checkbox" name="enableOtp" checked />
-                <span>Allow email backup codes</span>
-              </label>
-              <label class="checkbox-row">
-                <input type="checkbox" name="enableWebAuthn" checked />
-                <span>Ask for security keys on login</span>
+                <input name="sessionHours" type="number" value="8" placeholder="8" />
+                <small class="muted small">How long users stay logged in</small>
               </label>
             </fieldset>
 
             <fieldset>
-              <legend>Email helper (optional)</legend>
-              <label>
-                <span>SMTP host</span>
-                <input name="smtpHost" />
-              </label>
-              <label>
-                <span>SMTP port</span>
-                <input name="smtpPort" type="number" value="587" />
+              <legend>Authentication options</legend>
+              <label class="checkbox-row">
+                <input type="checkbox" name="enableOtp" id="enableOtpCheckbox" />
+                <span>Enable OTP email</span>
+                <small class="muted small">Allow users to receive one-time passwords via email</small>
               </label>
               <label class="checkbox-row">
-                <input type="checkbox" name="smtpSecure" />
-                <span>Use TLS</span>
-              </label>
-              <label>
-                <span>SMTP username</span>
-                <input name="smtpUsername" />
-              </label>
-              <label>
-                <span>SMTP password</span>
-                <input name="smtpPassword" type="password" />
-              </label>
-              <label>
-                <span>From address</span>
-                <input name="smtpFrom" placeholder="gateproxy@example.corp" />
-              </label>
-              <label>
-                <span>Reply-To (optional)</span>
-                <input name="smtpReplyTo" placeholder="helpdesk@example.corp" />
+                <input type="checkbox" name="enableWebAuthn" id="enableWebAuthnCheckbox" />
+                <span>Enable WebAuthn</span>
+                <small class="muted small">Allow users to use security keys or biometric authentication</small>
               </label>
             </fieldset>
           </div>
 
           <footer class="step-footer">
             <button class="ghost" type="button" data-action="prev">Back</button>
+            <button class="ghost" type="button" id="skip-server-setup">Skip (use defaults)</button>
+            <button class="primary" type="submit">Save &amp; continue</button>
+          </footer>
+        </form>
+
+        <form id="step-4" class="setup-step" data-step-index="4">
+          <header class="step-header">
+            <span class="step-pill" data-step-label></span>
+            <h2>Email setup</h2>
+            <p>Configure SMTP to send one-time passwords and notifications.</p>
+          </header>
+
+          <div class="step-body">
+            <fieldset>
+              <legend>SMTP server</legend>
+              <label>
+                <span>SMTP host</span>
+                <input name="smtpHost" placeholder="smtp.example.com" />
+                <small class="muted small">Your mail server hostname</small>
+              </label>
+              <label>
+                <span>SMTP port</span>
+                <input name="smtpPort" type="number" value="587" placeholder="587" />
+                <small class="muted small">Usually 587 for TLS or 465 for SSL</small>
+              </label>
+              <label class="checkbox-row">
+                <input type="checkbox" name="smtpSecure" />
+                <span>Use TLS</span>
+                <small class="muted small">Enable encryption for SMTP connections</small>
+              </label>
+            </fieldset>
+
+            <fieldset>
+              <legend>Authentication</legend>
+              <label>
+                <span>SMTP username</span>
+                <input name="smtpUsername" placeholder="gateproxy@example.com" />
+                <small class="muted small">Username for SMTP authentication</small>
+              </label>
+              <label>
+                <span>SMTP password</span>
+                <input name="smtpPassword" type="password" placeholder="••••••••" />
+                <small class="muted small">Password for SMTP authentication</small>
+              </label>
+            </fieldset>
+
+            <fieldset>
+              <legend>Email headers</legend>
+              <label>
+                <span>From address</span>
+                <input name="smtpFrom" placeholder="gateproxy@example.corp" />
+                <small class="muted small">Sender email address for notifications</small>
+              </label>
+              <label>
+                <span>Reply-To (optional)</span>
+                <input name="smtpReplyTo" placeholder="helpdesk@example.corp" />
+                <small class="muted small">Where replies to notifications should go</small>
+              </label>
+            </fieldset>
+          </div>
+
+          <footer class="step-footer">
+            <button class="ghost" type="button" data-action="prev">Back</button>
+            <button class="ghost" type="button" id="skip-email-setup">Skip (OTP will be disabled)</button>
             <button class="primary" type="submit">Save &amp; continue</button>
           </footer>
         </form>

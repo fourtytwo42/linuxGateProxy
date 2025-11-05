@@ -13,14 +13,16 @@ const setupImportFile = document.getElementById('setup-import-file');
 
 const prereqSection = document.getElementById('step-1');
 const ldapForm = document.getElementById('step-2');
-const siteForm = document.getElementById('step-3');
-// Step 4 removed - helper scripts accessible from step 2
+const serverForm = document.getElementById('step-3');
+const emailForm = document.getElementById('step-4');
+// Step 4 is now Email setup (conditional on OTP being enabled)
 
 let currentStep = 1;
 const setupState = {
   prereqs: null,
   ldap: null,
   site: null,
+  enableOtp: false, // Track if OTP is enabled to conditionally show email step
   cloudflare: null,
   resources: null
 };
@@ -53,12 +55,33 @@ function showStep(step) {
   steps.forEach((el) => el.classList.remove('is-active'));
   progressItems.forEach((item) => item.classList.remove('is-active', 'is-completed'));
 
-  // Count actual visible steps (excluding step-4 which is removed)
-  const totalSteps = 6; // 1: Start, 2: Domain, 3: Portal, 5: Cloudflare, 6: Resources, 7: Summary
+  // Count actual visible steps dynamically based on whether email step is shown
+  // Email step (4) is only shown if OTP is enabled
+  const emailStepShown = setupState.enableOtp === true;
+  const totalSteps = emailStepShown ? 7 : 6; // 1: Start, 2: Domain, 3: Server, 4: Email (conditional), 5: Cloudflare, 6: Resources, 7: Summary
   
-  // Map step numbers to actual step indices (skip step 4)
-  const stepMap = { 1: 1, 2: 2, 3: 3, 5: 4, 6: 5, 7: 6 };
-  const displayStep = stepMap[step] || step;
+  // Hide/show email step based on OTP setting
+  const emailStep = document.getElementById('step-4');
+  if (emailStep) {
+    if (!emailStepShown && step === 4) {
+      // Trying to show email step but OTP is disabled, skip to Cloudflare
+      navigateAfterServerSetup();
+      return;
+    }
+    // Hide email step if OTP is disabled (unless we're explicitly showing it)
+    if (!emailStepShown && currentStep !== 4) {
+      emailStep.style.display = 'none';
+    } else {
+      emailStep.style.display = '';
+    }
+  }
+  
+  // Map step numbers to display indices
+  // If email step is not shown, adjust the mapping
+  let displayStep = step;
+  if (!emailStepShown && step > 4) {
+    displayStep = step - 1; // Shift steps after 4 down by 1
+  }
   
   // Update progress text
   const progressText = document.getElementById('step-progress-text');
@@ -245,22 +268,28 @@ function applyStatus(status, { updateForms = false } = {}) {
     // Admin groups - Domain Admins is set as default on the server
     setupState.ldap = { ...status.auth };
   }
-  if (status.site) {
-    siteForm.listenAddress.value = status.site.listenAddress || '127.0.0.1';
-    siteForm.listenPort.value = status.site.listenPort || 5000;
-    siteForm.publicBaseUrl.value = status.site.publicBaseUrl || '';
-    siteForm.sessionHours.value = status.site.sessionHours || 8;
-    siteForm.enableOtp.checked = Boolean(status.site.enableOtp);
-    siteForm.enableWebAuthn.checked = Boolean(status.site.enableWebAuthn);
-    siteForm.smtpHost.value = status.smtp?.host || '';
-    siteForm.smtpPort.value = status.smtp?.port || 587;
-    siteForm.smtpSecure.checked = Boolean(status.smtp?.secure);
-    siteForm.smtpUsername.value = status.smtp?.username || '';
-    siteForm.smtpFrom.value = status.smtp?.fromAddress || '';
-    if (siteForm.smtpReplyTo) {
-      siteForm.smtpReplyTo.value = status.smtp?.replyTo || '';
-    }
+  if (status.site && serverForm) {
+    serverForm.listenAddress.value = status.site.listenAddress || '0.0.0.0';
+    serverForm.listenPort.value = status.site.listenPort || 5000;
+    serverForm.publicBaseUrl.value = status.site.publicBaseUrl || '';
+    serverForm.sessionHours.value = status.site.sessionHours || 8;
+    const enableOtpCheckbox = document.getElementById('enableOtpCheckbox');
+    const enableWebAuthnCheckbox = document.getElementById('enableWebAuthnCheckbox');
+    if (enableOtpCheckbox) enableOtpCheckbox.checked = Boolean(status.site.enableOtp);
+    if (enableWebAuthnCheckbox) enableWebAuthnCheckbox.checked = Boolean(status.site.enableWebAuthn);
     setupState.site = { ...status.site };
+    setupState.enableOtp = Boolean(status.site.enableOtp);
+  }
+  
+  if (status.smtp && emailForm) {
+    emailForm.smtpHost.value = status.smtp?.host || '';
+    emailForm.smtpPort.value = status.smtp?.port || 587;
+    emailForm.smtpSecure.checked = Boolean(status.smtp?.secure);
+    emailForm.smtpUsername.value = status.smtp?.username || '';
+    emailForm.smtpFrom.value = status.smtp?.fromAddress || '';
+    if (emailForm.smtpReplyTo) {
+      emailForm.smtpReplyTo.value = status.smtp?.replyTo || '';
+    }
   }
   // Step 4 now shows download links directly in the HTML
   resourceList.innerHTML = '';
@@ -310,18 +339,23 @@ document.querySelectorAll('button[data-action="prev"]').forEach((button) => {
   button.addEventListener('click', (event) => {
     event.preventDefault();
     
-    // Define valid step sequence (skip step 4)
-    const validSteps = [1, 2, 3, 5, 6, 7];
+    // Define valid step sequence based on whether email step is shown
+    const emailStepShown = setupState.enableOtp === true;
+    const validSteps = emailStepShown ? [1, 2, 3, 4, 5, 6, 7] : [1, 2, 3, 5, 6, 7];
     const currentIndex = validSteps.indexOf(currentStep);
     
     if (currentIndex > 0) {
       let prevStep = validSteps[currentIndex - 1];
       
       // If going back from Resources (step 6) and Cloudflare was already authenticated,
-      // skip Cloudflare (step 5) and go directly to Portal settings (step 3)
+      // skip Cloudflare (step 5) and go directly to the previous step
       if (currentStep === 6 && setupState.cloudflare?.configured) {
-        // Check if we actually saw Cloudflare step or skipped it
-        // If configured is true, we likely skipped it, so go back to step 3
+        // Go back to email step if shown, otherwise server setup
+        prevStep = emailStepShown ? 4 : 3;
+      }
+      
+      // If going back from Cloudflare (step 5) and email step isn't shown, go to server setup
+      if (currentStep === 5 && !emailStepShown) {
         prevStep = 3;
       }
       
@@ -787,58 +821,151 @@ ldapForm.addEventListener('submit', async (event) => {
 });
 
 // Step 2 - Site
-siteForm.addEventListener('submit', async (event) => {
-  event.preventDefault();
-  clearAlert();
-  const form = event.target;
-  const payload = serializeForm(form);
-  payload.enableOtp = !!payload.enableOtp;
-  payload.enableWebAuthn = !!payload.enableWebAuthn;
-
-  try {
+// Step 3 - Server Setup
+if (serverForm) {
+  // Skip server setup button
+  document.getElementById('skip-server-setup')?.addEventListener('click', async (event) => {
+    event.preventDefault();
+    clearAlert();
+    
+    // Use defaults
+    const defaults = {
+      listenAddress: '0.0.0.0',
+      listenPort: 5000,
+      publicBaseUrl: '',
+      sessionHours: 8,
+      enableOtp: false,
+      enableWebAuthn: false
+    };
+    
+    try {
+      await postJson('/api/setup/site', defaults);
+      setupState.site = defaults;
+      setupState.enableOtp = false;
+      
+      // Navigate to next step (skip email if OTP disabled, go to Cloudflare)
+      navigateAfterServerSetup();
+    } catch (error) {
+      showAlert(error.message);
+    }
+  });
+  
+  serverForm.addEventListener('submit', async (event) => {
+    event.preventDefault();
+    clearAlert();
+    const form = event.target;
+    const payload = serializeForm(form);
+    
+    const enableOtp = !!document.getElementById('enableOtpCheckbox')?.checked;
+    const enableWebAuthn = !!document.getElementById('enableWebAuthnCheckbox')?.checked;
+    
     const sitePayload = {
-      listenAddress: payload.listenAddress,
-      listenPort: payload.listenPort,
-      publicBaseUrl: payload.publicBaseUrl,
-      sessionHours: payload.sessionHours,
-      enableOtp: payload.enableOtp,
-      enableWebAuthn: payload.enableWebAuthn
+      listenAddress: payload.listenAddress || '0.0.0.0',
+      listenPort: Number(payload.listenPort) || 5000,
+      publicBaseUrl: payload.publicBaseUrl || '',
+      sessionHours: Number(payload.sessionHours) || 8,
+      enableOtp: enableOtp,
+      enableWebAuthn: enableWebAuthn
     };
 
-    await postJson('/api/setup/site', sitePayload);
-    setupState.site = sitePayload;
+    try {
+      await postJson('/api/setup/site', sitePayload);
+      setupState.site = sitePayload;
+      setupState.enableOtp = enableOtp;
+      
+      navigateAfterServerSetup();
+    } catch (error) {
+      showAlert(error.message);
+    }
+  });
+}
 
-    const smtpPayload = {
-      host: payload.smtpHost,
-      port: payload.smtpPort,
-      secure: !!payload.smtpSecure,
-      username: payload.smtpUsername,
-      password: payload.smtpPassword,
-      fromAddress: payload.smtpFrom,
-      replyTo: payload.smtpReplyTo
-    };
-
-    await postJson('/api/setup/smtp', smtpPayload);
-
-    // After Portal settings, check Cloudflare status and navigate accordingly
+// Helper function to navigate after server setup
+async function navigateAfterServerSetup() {
+  // If OTP is enabled, show email setup (step 4)
+  // Otherwise skip to Cloudflare (step 5)
+  if (setupState.enableOtp) {
+    showStep(4);
+  } else {
+    // Skip email setup, go to Cloudflare
     try {
       const cloudflareCheck = await getJson('/api/setup/cloudflare/check');
       if (cloudflareCheck.authenticated) {
-        // Cloudflare already configured, skip to resources step
+        setupState.cloudflare = { configured: true };
+        showStep(6); // Skip to resources
+      } else {
+        showStep(5); // Show Cloudflare
+      }
+    } catch (cloudflareError) {
+      showStep(5); // Show Cloudflare if check fails
+    }
+  }
+}
+
+// Step 4 - Email Setup (conditional - only shown if OTP enabled)
+if (emailForm) {
+  // Skip email setup button
+  document.getElementById('skip-email-setup')?.addEventListener('click', async (event) => {
+    event.preventDefault();
+    clearAlert();
+    
+    // Disable OTP since email is skipped
+    if (setupState.site) {
+      setupState.site.enableOtp = false;
+      setupState.enableOtp = false;
+      await postJson('/api/setup/site', setupState.site);
+    }
+    
+    // Navigate to Cloudflare
+    try {
+      const cloudflareCheck = await getJson('/api/setup/cloudflare/check');
+      if (cloudflareCheck.authenticated) {
         setupState.cloudflare = { configured: true };
         showStep(6);
       } else {
-        // Cloudflare not configured, show Cloudflare step
         showStep(5);
       }
     } catch (cloudflareError) {
-      // If check fails, assume not configured and show Cloudflare step
       showStep(5);
     }
-  } catch (error) {
-    showAlert(error.message);
-  }
-});
+  });
+  
+  emailForm.addEventListener('submit', async (event) => {
+    event.preventDefault();
+    clearAlert();
+    const form = event.target;
+    const payload = serializeForm(form);
+    
+    const smtpPayload = {
+      host: payload.smtpHost || '',
+      port: Number(payload.smtpPort) || 587,
+      secure: !!payload.smtpSecure,
+      username: payload.smtpUsername || '',
+      password: payload.smtpPassword || '',
+      fromAddress: payload.smtpFrom || '',
+      replyTo: payload.smtpReplyTo || ''
+    };
+
+    try {
+      await postJson('/api/setup/smtp', smtpPayload);
+      
+      // Navigate to Cloudflare
+      try {
+        const cloudflareCheck = await getJson('/api/setup/cloudflare/check');
+        if (cloudflareCheck.authenticated) {
+          setupState.cloudflare = { configured: true };
+          showStep(6);
+        } else {
+          showStep(5);
+        }
+      } catch (cloudflareError) {
+        showStep(5);
+      }
+    } catch (error) {
+      showAlert(error.message);
+    }
+  });
+}
 
 // Step 4 - Setup Scripts (download links with instructions shown in HTML)
 // Step 4 Continue button (no form submission needed)
