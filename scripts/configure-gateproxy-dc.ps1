@@ -268,10 +268,10 @@ Write-Host "================================================================" -F
 Write-Host ""
 Write-Host "Your domain controller is now configured for GateProxy:" -ForegroundColor Green
 if (-not $SkipLDAPS) {
-    Write-Host "  ✓ LDAPS (port 636) configured" -ForegroundColor Green
+    Write-Host "  [X] LDAPS on port 636 configured" -ForegroundColor Green
 }
 if (-not $SkipSchema) {
-    Write-Host "  ✓ Active Directory schema updated" -ForegroundColor Green
+    Write-Host "  [X] Active Directory schema updated" -ForegroundColor Green
 }
 Write-Host ""
 Write-Host "You can now test the LDAP connection from GateProxy." -ForegroundColor Cyan
