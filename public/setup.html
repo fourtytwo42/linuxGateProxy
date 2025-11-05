@@ -142,35 +142,39 @@
                 <p>We automatically allow the <strong>Domain Admins</strong> group. You can add more later in the admin page.</p>
               </div>
               
-              <!-- LDAPS Configuration Notice -->
-              <div id="ldapsConfigNotice" class="callout warning" style="display: none;">
-                <h4>LDAPS Configuration Required</h4>
-                <p>Your domain controller requires LDAPS (secure LDAP) to be configured. The connection test failed because:</p>
-                <ul>
-                  <li>LDAPS (port 636) is not properly configured</li>
-                  <li>The server requires secure connections but cannot initialize TLS/SSL</li>
+              <!-- Domain Controller Configuration -->
+              <div class="callout neutral dc-config-callout">
+                <h4>Domain Controller Setup Required</h4>
+                <p>Before testing the connection, make sure your domain controller is configured:</p>
+                <ul class="dc-config-checklist">
+                  <li>LDAPS (port 636) is bound to a certificate</li>
+                  <li>GateProxy schema attributes are installed</li>
                 </ul>
-                <p><strong>Solution:</strong> Download and run the configuration script on your domain controller.</p>
-                <div style="margin-top: 1rem;">
-                  <a href="/share/configure-gateproxy-dc.zip" class="button primary" download>
+                <div class="dc-config-actions">
+                  <a href="/share/configure-gateproxy-dc.zip" class="button primary dc-config-download" download>
                     <span aria-hidden="true">⬇</span>
                     <span>Download configure-gateproxy-dc.zip</span>
                   </a>
+                  <span class="muted small">Run on the Schema Master as a Schema&nbsp;Admin + Domain&nbsp;Admin.</span>
                 </div>
-                <ol class="guide-list" style="margin-top: 1rem;">
-                  <li>Download and extract the ZIP file on your <strong>Schema Master Domain Controller</strong></li>
-                  <li>Right-click <code>configure-gateproxy-dc.bat</code> and select "Run as Administrator"</li>
-                  <li>The script will:
+                <ol class="guide-list dc-config-steps">
+                  <li>Download and extract on your <strong>Schema Master Domain Controller</strong></li>
+                  <li>Right-click <code>configure-gateproxy-dc.bat</code> and select <em>Run as administrator</em></li>
+                  <li>The script will automatically:
                     <ul>
-                      <li>Configure LDAPS (port 636) with certificate binding</li>
-                      <li>Update the Active Directory schema with GateProxy attributes</li>
+                      <li>Bind an LDAPS certificate (port&nbsp;636)</li>
+                      <li>Update the Active Directory schema for GateProxy</li>
                     </ul>
                   </li>
-                  <li>After the script completes, return here and test the connection again</li>
+                  <li>Return here and test the connection again</li>
                 </ol>
-                <p class="muted small" style="margin-top: 0.5rem;">
-                  <strong>Requirements:</strong> You must be logged in as a user who is a member of both <strong>Schema Admins</strong> and <strong>Domain Admins</strong> groups.
-                </p>
+              </div>
+              
+              <!-- LDAPS Configuration Error Notice (shown only on error) -->
+              <div id="ldapsConfigNotice" class="callout warning dc-config-error" style="display: none;">
+                <h4>LDAPS Configuration Error</h4>
+                <p>The connection test failed because the domain controller could not negotiate a secure LDAP session.</p>
+                <p><strong>Please run the GateProxy domain controller script above, then retry the test.</strong></p>
               </div>
             </fieldset>
           </div>

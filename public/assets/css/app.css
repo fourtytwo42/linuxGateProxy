@@ -473,11 +473,59 @@ small {
 
 .callout.neutral {
   border-color: color-mix(in srgb, var(--brand) 20%, transparent);
+  background: color-mix(in srgb, var(--brand) 12%, transparent);
 }
 
 .callout h4 {
   margin: 0;
   font-size: 1rem;
+}
+
+.dc-config-callout {
+  gap: 1rem;
+}
+
+.dc-config-checklist {
+  margin: 0;
+  padding-left: 1.1rem;
+  display: grid;
+  gap: 0.35rem;
+}
+
+.dc-config-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+}
+
+.dc-config-download {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.dc-config-steps {
+  gap: 0.5rem;
+}
+
+.dc-config-error {
+  margin-top: 1rem;
+}
+
+@media (max-width: 900px) {
+  .dc-config-actions {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .dc-config-download {
+    justify-content: center;
+  }
+
+  .dc-config-actions .muted.small {
+    text-align: center;
+  }
 }
 
 .form-actions {

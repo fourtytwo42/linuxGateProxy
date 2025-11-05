@@ -132,6 +132,14 @@ After completing the steps above, rerun `update_schema_gateproxy.ps1 -Action Ini
 "@
             throw $guidance
         }
+        
+        # Exit code 8202 is "No Such Attribute" - often means schema hasn't replicated yet
+        if ($process.ExitCode -eq 8202) {
+            Write-Warning "LDIF import returned 'No Such Attribute' (exit code 8202). This may indicate schema replication is needed."
+            Write-Warning "The attribute may need time to replicate before it can be added to the user class."
+            Write-Warning "You may need to wait a few minutes and retry, or the attribute may already be correctly configured."
+        }
+        
         throw "ldifde exited with code $($process.ExitCode). Arguments: $($mergedArgs -join ' ')"
     }
 }
@@ -157,7 +165,9 @@ function Export-GateProxySchema {
         }
     }
     $filter = "(|$($filterParts -join ''))"
-    Invoke-Ldifde -Arguments @('-f', $OutputPath, '-d', $SchemaNc, '-p', 'subtree', '-r', $filter, '-l', '*', '-o', 'whenChanged,whenCreated')
+    # Quote the output path to handle spaces and special characters like (1)
+    $quotedPath = "`"$OutputPath`""
+    Invoke-Ldifde -Arguments @('-f', $quotedPath, '-d', $SchemaNc, '-p', 'subtree', '-r', $filter, '-l', '*', '-o', 'whenChanged,whenCreated')
 }
 
 function Test-AttributeExists {
@@ -178,7 +188,8 @@ function New-TempLdif {
     param([string]$Content)
     $temp = New-TemporaryFile
     Set-Content -Path $temp -Value $Content -Encoding Unicode
-    return $temp
+    # Return quoted path to handle spaces and special characters
+    return "`"$($temp.FullName)`""
 }
 
 function Get-UserClassObject {
@@ -209,6 +220,10 @@ function Ensure-UserClassMayContain {
         return
     }
 
+    # Wait a moment for schema replication if attribute was just created
+    Write-Host "Waiting for schema replication..." -ForegroundColor DarkGray
+    Start-Sleep -Seconds 3
+
     try {
         Set-ADObject -Identity $UserClassDn -Add @{ mayContain = $AttributeName } -ErrorAction Stop
         Write-Host "Linked $AttributeName to user class." -ForegroundColor Green
@@ -218,7 +233,18 @@ function Ensure-UserClassMayContain {
             return
         }
 
-        Write-Warning "Direct update of user class failed ($($_.Exception.Message)). Attempting LDIF import..."
+        Write-Warning "Direct update of user class failed ($($_.Exception.Message)). Waiting longer and retrying..."
+        
+        # Wait longer for schema replication
+        Start-Sleep -Seconds 5
+        
+        try {
+            Set-ADObject -Identity $UserClassDn -Add @{ mayContain = $AttributeName } -ErrorAction Stop
+            Write-Host "Linked $AttributeName to user class on retry." -ForegroundColor Green
+            return
+        } catch {
+            Write-Warning "Second attempt also failed. Trying LDIF import..."
+        }
 
         $ldif = @"
 dn: $UserClassDn
@@ -230,9 +256,23 @@ mayContain: $AttributeName
 
         $tempLdif = New-TempLdif -Content $ldif
         try {
+            # Wait a bit more before LDIF import
+            Start-Sleep -Seconds 2
             Invoke-Ldifde -Arguments @('-i','-k','-f', $tempLdif)
             Write-Host "Linked $AttributeName to user class via ldifde." -ForegroundColor Green
         } catch {
+            Write-Warning "LDIF import failed. This may be normal if the attribute was already added. Error: $($_.Exception.Message)"
+            # Check if it's actually there now
+            $userClassCheck = Get-UserClassObject -UserClassDn $UserClassDn
+            $currentCheck = @()
+            if ($userClassCheck.mayContain) { $currentCheck += $userClassCheck.mayContain }
+            if ($userClassCheck.systemMayContain) { $currentCheck += $userClassCheck.systemMayContain }
+            
+            if ($currentCheck -contains $AttributeName) {
+                Write-Host "Attribute $AttributeName is already in user class (may have been replicated)." -ForegroundColor Green
+                return
+            }
+            
             throw "Failed to add $AttributeName to user class: $($_.Exception.Message)"
         } finally {
             Remove-Item $tempLdif -Force -ErrorAction SilentlyContinue
@@ -326,7 +366,8 @@ switch ($Action) {
         }
         $fullPath = Resolve-Path $RestoreFile -ErrorAction Stop
         Write-Host "Restoring schema content from $fullPath" -ForegroundColor Yellow
-        Invoke-Ldifde -Arguments @('-i', '-k', '-f', $fullPath)
+        $quotedPath = "`"$fullPath`""
+        Invoke-Ldifde -Arguments @('-i', '-k', '-f', $quotedPath)
         Write-Host 'Restore completed.' -ForegroundColor Green
     }
     'RemoveCustom' {
@@ -394,6 +435,33 @@ systemOnly: FALSE
                 }
             }
 
+            # Wait for schema replication before adding to user class
+            # Schema changes need time to replicate before they can be referenced
+            Write-Host "Waiting for schema replication before linking $($attr.Name) to user class..." -ForegroundColor DarkGray
+            Start-Sleep -Seconds 5
+            
+            # Verify the attribute exists before trying to add it to the class
+            $maxRetries = 3
+            $retryCount = 0
+            $attributeVerified = $false
+            
+            while ($retryCount -lt $maxRetries -and -not $attributeVerified) {
+                if (Test-AttributeExists -SchemaNc $schemaNc -AttributeName $attr.Name) {
+                    $attributeVerified = $true
+                    Write-Host "Attribute $($attr.Name) verified in schema." -ForegroundColor DarkGray
+                } else {
+                    $retryCount++
+                    if ($retryCount -lt $maxRetries) {
+                        Write-Host "Attribute $($attr.Name) not yet replicated, waiting 5 more seconds (attempt $retryCount/$maxRetries)..." -ForegroundColor Yellow
+                        Start-Sleep -Seconds 5
+                    }
+                }
+            }
+            
+            if (-not $attributeVerified) {
+                Write-Warning "Could not verify attribute $($attr.Name) exists after waiting. Continuing anyway - it may have replicated."
+            }
+            
             Ensure-UserClassMayContain -UserClassDn $userClassDn -AttributeName $attr.Name
         }
     }
