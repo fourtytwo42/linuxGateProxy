@@ -27,14 +27,29 @@ function filterResourcesForUser(resources, user) {
   });
 }
 
-router.get('/', requireAuth, (req, res, next) => {
+router.get('/', requireAuth, async (req, res, next) => {
   const config = loadConfig();
   if (!config.setup.completed) {
     return res.redirect('/setup');
   }
   const resources = filterResourcesForUser(listResources(), req.auth.user);
   if (resources.length === 0) {
-    return proxyRequest(req, res, next, config.proxy.targetHost);
+    // No resources accessible - show appropriate page based on user role
+    const { userHasGroup } = await import('../services/ldapService.js');
+    const adminGroups = (config.adminPortal?.allowedGroupDns?.length
+      ? config.adminPortal.allowedGroupDns
+      : config.auth.adminGroupDns) || [];
+    
+    // Check if user is admin
+    const isAdmin = req.auth?.user && userHasGroup(req.auth.user, adminGroups);
+    
+    if (isAdmin) {
+      // Admin users see configure target page with admin overlay
+      return res.sendFile(path.join(publicDir, 'configure-target.html'));
+    } else {
+      // Regular users see coming soon page (no admin overlay)
+      return res.sendFile(path.join(publicDir, 'coming-soon.html'));
+    }
   }
   if (resources.length === 1) {
     return res.redirect(`/resource/${resources[0].id}`);
