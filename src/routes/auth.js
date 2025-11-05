@@ -112,21 +112,48 @@ router.post('/api/login', loginLimiter, async (req, res, next) => {
     }
 
     logger.debug('Looking up user in LDAP', { username });
-    const user = await findUser(username, { attributes: ['memberOf', 'mail'] });
+    let user;
+    try {
+      user = await findUser(username, { attributes: ['memberOf', 'mail'] });
+    } catch (error) {
+      logger.error('Error looking up user in LDAP', { username, error: error.message });
+      return res.status(500).json({ error: 'Error connecting to directory server' });
+    }
+    
     if (!user) {
       logger.warn('User not found in LDAP', { username });
       return res.status(401).json({ error: 'Invalid credentials' });
     }
+    
+    const userDn = user.distinguishedName || user.dn;
     logger.info('User found in LDAP', { 
-      username: user.sAMAccountName || user.userPrincipalName, 
-      dn: user.distinguishedName || user.dn 
+      username: user.sAMAccountName || user.userPrincipalName,
+      userPrincipalName: user.userPrincipalName,
+      sAMAccountName: user.sAMAccountName,
+      dn: userDn
     });
 
-    logger.debug('Validating user credentials');
-    const valid = await validateCredentials(user.distinguishedName || user.dn, password);
+    logger.debug('Validating user credentials', { 
+      userDn,
+      username: user.sAMAccountName || user.userPrincipalName
+    });
+    
+    let valid;
+    try {
+      valid = await validateCredentials(userDn, password);
+    } catch (error) {
+      logger.error('Error validating credentials', { 
+        username: user.sAMAccountName || user.userPrincipalName,
+        userDn,
+        error: error.message 
+      });
+      return res.status(500).json({ error: error.message || 'Error validating credentials' });
+    }
+    
     if (!valid) {
       logger.warn('Invalid credentials for user', { 
-        username: user.sAMAccountName || user.userPrincipalName 
+        username: user.sAMAccountName || user.userPrincipalName,
+        userDn
       });
       return res.status(401).json({ error: 'Invalid credentials' });
     }
