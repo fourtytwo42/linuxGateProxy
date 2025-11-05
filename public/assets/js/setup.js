@@ -723,7 +723,21 @@ ldapForm.addEventListener('submit', async (event) => {
       updateConnectionStatus(result.connectionType, result.port);
     }
     
-    showStep(5);
+    // Check if Cloudflare is already authenticated, skip if so
+    try {
+      const cloudflareCheck = await getJson('/api/setup/cloudflare/check');
+      if (cloudflareCheck.authenticated) {
+        // Cloudflare already configured, skip to resources step
+        setupState.cloudflare = { configured: true };
+        showStep(6);
+      } else {
+        // Cloudflare not configured, show Cloudflare step
+        showStep(5);
+      }
+    } catch (cloudflareError) {
+      // If check fails, assume not configured and show Cloudflare step
+      showStep(5);
+    }
   } catch (error) {
     // Hide status on error
     if (connectionStatus) {
