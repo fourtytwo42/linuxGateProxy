@@ -434,7 +434,6 @@ router.post('/api/setup/cloudflare/start', async (req, res, next) => {
 
 router.get('/api/setup/cloudflare/check', async (req, res, next) => {
   try {
-    const { hasCertificate } = await import('../services/cloudflareService.js');
     const authenticated = hasCertificate();
     res.json({ authenticated });
   } catch (error) {
