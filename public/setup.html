@@ -27,7 +27,7 @@
 
       <div class="progress-strip">
         <div class="progress-track"><div class="progress-fill" id="step-progress-fill"></div></div>
-        <span class="progress-text" id="step-progress-text">Step 1 of 7</span>
+        <span class="progress-text" id="step-progress-text">Step 1 of 6</span>
       </div>
 
       <section id="alert" class="notification is-hidden"></section>
@@ -260,53 +260,7 @@
           </footer>
         </form>
 
-        <section id="step-4" class="setup-step" data-step-index="4">
-          <header class="step-header">
-            <span class="step-pill" data-step-label></span>
-            <h2>Run the helper scripts</h2>
-            <p>These bundles finish the work inside your domain.</p>
-          </header>
-
-          <div class="card-grid">
-            <article class="wizard-card">
-              <h3>Domain controller</h3>
-              <p>Run on the Schema Master while signed in as a Schema Admin.</p>
-              <a class="outline" href="/share/configure-domain-controller.zip" download>Download configure-domain-controller.zip</a>
-              <ol class="guide-list">
-                <li>Download and unzip the folder.</li>
-                <li>Right-click <code>configure-domain-controller.bat</code> and choose “Run as administrator”.</li>
-                <li>Wait for the window to finish. No extra input is needed.</li>
-              </ol>
-              <p class="muted small">All scripts are inside the ZIP along with auto-elevating BAT files.</p>
-            </article>
-
-            <article class="wizard-card">
-              <h3>Certificate server</h3>
-              <p>Run on the Windows Server that hosts Active Directory Certificate Services.</p>
-              <a class="outline" href="/share/configure-certificate-server.zip" download>Download configure-certificate-server.zip</a>
-              <ol class="guide-list">
-                <li>Download and unzip the folder on the CA server.</li>
-                <li>Run <code>configure-certificate-server.bat</code> as administrator.</li>
-                <li>Let the script install any missing tools and prep the CA.</li>
-              </ol>
-              <p class="muted small">Use an account with Enterprise Admin or CA Admin rights.</p>
-            </article>
-          </div>
-
-          <div class="note-card">
-            <h3>Helpful reminders</h3>
-            <ul>
-              <li>Every ZIP packs both PowerShell and BAT launchers.</li>
-              <li>Keep the extracted folders so you can rerun the scripts later.</li>
-              <li>If accessing from another PC, swap <code>localhost</code> with this server’s IP.</li>
-            </ul>
-          </div>
-
-          <footer class="step-footer">
-            <button class="ghost" type="button" data-action="prev">Back</button>
-            <button class="primary" type="button" data-action="next">Continue</button>
-          </footer>
-        </section>
+        <!-- Step 4 removed - helper scripts are accessible from step 2 (Domain setup) -->
 
         <section id="step-5" class="setup-step" data-step-index="5">
           <header class="step-header">

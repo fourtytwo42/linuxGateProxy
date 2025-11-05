@@ -14,7 +14,7 @@ const setupImportFile = document.getElementById('setup-import-file');
 const prereqSection = document.getElementById('step-1');
 const ldapForm = document.getElementById('step-2');
 const siteForm = document.getElementById('step-3');
-const step4Div = document.getElementById('step-4');
+// Step 4 removed - helper scripts accessible from step 2
 
 let currentStep = 1;
 const setupState = {
@@ -53,6 +53,25 @@ function showStep(step) {
   currentStep = step;
   steps.forEach((el) => el.classList.remove('is-active'));
   progressItems.forEach((item) => item.classList.remove('is-active', 'is-completed'));
+
+  // Count actual visible steps (excluding step-4 which is removed)
+  const totalSteps = 6; // 1: Start, 2: Domain, 3: Portal, 5: Cloudflare, 6: Resources, 7: Summary
+  
+  // Map step numbers to actual step indices (skip step 4)
+  const stepMap = { 1: 1, 2: 2, 3: 3, 5: 4, 6: 5, 7: 6 };
+  const displayStep = stepMap[step] || step;
+  
+  // Update progress text
+  const progressText = document.getElementById('step-progress-text');
+  if (progressText) {
+    progressText.textContent = `Step ${displayStep} of ${totalSteps}`;
+  }
+  
+  // Update progress bar fill
+  const progressFill = document.getElementById('step-progress-fill');
+  if (progressFill) {
+    progressFill.style.width = `${(displayStep / totalSteps) * 100}%`;
+  }
 
   for (let i = 1; i < step; i += 1) {
     const item = progressItems.find((p) => Number(p.dataset.step) === i);
@@ -298,8 +317,14 @@ function prepareSummary() {
 document.querySelectorAll('button[data-action="prev"]').forEach((button) => {
   button.addEventListener('click', (event) => {
     event.preventDefault();
-    if (currentStep > 1) {
-      showStep(currentStep - 1);
+    
+    // Define valid step sequence (skip step 4)
+    const validSteps = [1, 2, 3, 5, 6, 7];
+    const currentIndex = validSteps.indexOf(currentStep);
+    
+    if (currentIndex > 0) {
+      const prevStep = validSteps[currentIndex - 1];
+      showStep(prevStep);
     }
   });
 });
@@ -815,11 +840,8 @@ siteForm.addEventListener('submit', async (event) => {
 
 // Step 4 - Setup Scripts (download links with instructions shown in HTML)
 // Step 4 Continue button (no form submission needed)
-step4Div?.querySelector('button[data-action="next"]')?.addEventListener('click', (event) => {
-  event.preventDefault();
-  setupState.samba = { enabled: true, method: 'http' }; // Mark as enabled for consistency
-  showStep(5);
-});
+// Step 4 removed - helper scripts are now accessible from step 2
+// Direct navigation from step 3 to step 5 (Cloudflare)
 
 // Step 4 - Cloudflare
 let cloudflarePollInterval = null;
