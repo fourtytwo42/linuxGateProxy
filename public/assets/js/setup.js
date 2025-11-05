@@ -18,6 +18,7 @@ const emailForm = document.getElementById('step-4');
 // Step 4 is now Email setup (conditional on OTP being enabled)
 
 let currentStep = 1;
+let emailTestPassed = false; // Track if email connection test passed
 const setupState = {
   prereqs: null,
   ldap: null,
@@ -902,9 +903,7 @@ async function navigateAfterServerSetup() {
   }
 }
 
-// Track email test status
-let emailTestPassed = false;
-
+// Step 4 - Email Setup (conditional - only shown if OTP enabled)
 if (emailForm) {
   const testEmailBtn = document.getElementById('test-email-connection');
   const emailTestStatus = document.getElementById('email-test-status');
