@@ -168,7 +168,27 @@ router.post('/gateProxyAdmin/api/settings/site', requireAdmin, (req, res) => {
 });
 
 router.post('/gateProxyAdmin/api/settings/auth', requireAdmin, (req, res) => {
-  saveConfigSection('auth', { ...loadConfig().auth, ...req.body });
+  // Attribute names are fixed by the domain controller schema script
+  // They cannot be changed - must match update-schema-gateproxy.ps1
+  const FIXED_SESSION_ATTR = 'gateProxySession';
+  const FIXED_WEBAUTHN_ATTR = 'gateProxyWebAuthn';
+  
+  const existingAuth = loadConfig().auth;
+  const updates = { ...existingAuth, ...req.body };
+  
+  // Always enforce the fixed attribute names
+  updates.sessionAttribute = FIXED_SESSION_ATTR;
+  updates.webAuthnAttribute = FIXED_WEBAUTHN_ATTR;
+  
+  // Update LDAP connection settings if provided
+  if (req.body.ldapPort !== undefined) {
+    updates.ldapPort = Number(req.body.ldapPort);
+  }
+  if (req.body.useLdaps !== undefined) {
+    updates.useLdaps = Boolean(req.body.useLdaps);
+  }
+  
+  saveConfigSection('auth', updates);
   res.json({ success: true });
 });
 

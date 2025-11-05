@@ -4,7 +4,7 @@
     <meta charset="UTF-8" />
     <meta http-equiv="X-UA-Compatible" content="IE=edge" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Linux Gate Proxy Setup</title>
+    <title>Gate Proxy Setup</title>
     <link rel="stylesheet" href="https://unpkg.com/open-props@1.6.14" />
     <link rel="stylesheet" href="https://unpkg.com/open-props/normalize.min.css" />
     <link
@@ -20,7 +20,7 @@
       <header class="setup-hero">
         <div class="hero-badge">GP</div>
         <div class="hero-copy">
-          <h1>Linux Gate Proxy Setup</h1>
+          <h1>Gate Proxy Setup</h1>
           <p>We will walk through tiny steps so everything feels easy.</p>
         </div>
       </header>
@@ -75,55 +75,102 @@
           <header class="step-header">
             <span class="step-pill" data-step-label></span>
             <h2>Tell us about your domain</h2>
-            <p>These clues help Gate Proxy find your directory.</p>
+            <p>These details help Gate Proxy find your directory.</p>
           </header>
 
           <div class="step-body two-column">
             <fieldset>
-              <legend>Domain basics</legend>
-              <label>
-                <span>Domain name</span>
-                <input name="domain" required placeholder="example.corp" />
-              </label>
-              <label>
-                <span>LDAP host</span>
-                <input name="ldapHost" required placeholder="dc01.example.corp" />
-              </label>
-              <label>
-                <span>Base DN</span>
-                <input name="baseDn" required placeholder="DC=example,DC=corp" />
-              </label>
-              <label>
-                <span>LDAP port</span>
-                <input name="ldapPort" type="number" value="636" />
-              </label>
-              <label class="checkbox-row">
-                <input type="checkbox" name="useLdaps" checked />
-                <span>Use secure LDAPS (recommended)</span>
-              </label>
+              <legend>Domain details</legend>
+              <div class="domain-basics-simple">
+                <label>
+                  <span>LDAP host</span>
+                  <div style="display: flex; gap: 0.5rem;">
+                    <select id="ldapHostSelect" style="flex: 1; min-width: 0;">
+                      <option value="">Choose a discovered server...</option>
+                    </select>
+                    <span style="align-self: center; color: var(--text-muted);">or</span>
+                    <input name="ldapHost" required placeholder="dc01.example.corp or IP address" id="ldapHostInput" style="flex: 2; min-width: 0;" />
+                  </div>
+                  <small class="muted small" id="ldapHostHint">Enter hostname or IP address</small>
+                </label>
+                <div id="ldapConnectionStatus" class="connection-status" style="display: none;">
+                  <span class="status-indicator"></span>
+                  <span class="status-text">Connecting...</span>
+                </div>
+                <button type="button" class="advanced-toggle" id="domainAdvancedToggle">
+                  <span>Advanced</span>
+                  <span class="toggle-icon">▼</span>
+                </button>
+              </div>
+              <div class="domain-basics-advanced" id="domainAdvanced" style="display: none;">
+                <label>
+                  <span>Domain name</span>
+                  <input name="domain" placeholder="example.corp" id="domainInput" />
+                  <small class="muted small">Auto-filled from LDAP host</small>
+                </label>
+                <label>
+                  <span>Base DN</span>
+                  <input name="baseDn" placeholder="DC=example,DC=corp" id="baseDnInput" />
+                  <small class="muted small">Auto-filled from LDAP host</small>
+                </label>
+                <label>
+                  <span>LDAPS port</span>
+                  <input name="ldapsPort" type="number" value="636" placeholder="636" />
+                  <small class="muted small">Port for secure LDAPS connections (default: 636)</small>
+                </label>
+                <label>
+                  <span>LDAP port</span>
+                  <input name="ldapPort" type="number" value="389" placeholder="389" />
+                  <small class="muted small">Port for non-secure LDAP connections (default: 389)</small>
+                </label>
+              </div>
             </fieldset>
 
             <fieldset>
               <legend>Service account</legend>
-              <label>
-                <span>Account sign-in (UPN)</span>
-                <input name="lookupUser" required placeholder="gateproxy@example.corp" />
-              </label>
+                <label>
+                  <span>Service account</span>
+                  <input name="lookupUser" required placeholder="username, username@domain.com, or domain\username" />
+                  <small class="muted small">Enter username in any format (plain username, UPN, or domain\username)</small>
+                </label>
               <label>
                 <span>Password</span>
                 <input name="password" type="password" required />
               </label>
-              <label>
-                <span>Session attribute name</span>
-                <input name="sessionAttribute" value="gateProxySession" />
-              </label>
-              <label>
-                <span>WebAuthn attribute name</span>
-                <input name="webAuthnAttribute" value="gateProxyWebAuthn" />
-              </label>
               <div class="info-card">
                 <p class="info-title">Who can manage Gate Proxy?</p>
                 <p>We automatically allow the <strong>Domain Admins</strong> group. You can add more later in the admin page.</p>
+              </div>
+              
+              <!-- LDAPS Configuration Notice -->
+              <div id="ldapsConfigNotice" class="callout warning" style="display: none;">
+                <h4>LDAPS Configuration Required</h4>
+                <p>Your domain controller requires LDAPS (secure LDAP) to be configured. The connection test failed because:</p>
+                <ul>
+                  <li>LDAPS (port 636) is not properly configured</li>
+                  <li>The server requires secure connections but cannot initialize TLS/SSL</li>
+                </ul>
+                <p><strong>Solution:</strong> Download and run the configuration script on your domain controller.</p>
+                <div style="margin-top: 1rem;">
+                  <a href="/share/configure-gateproxy-dc.zip" class="button primary" download>
+                    <span aria-hidden="true">⬇</span>
+                    <span>Download configure-gateproxy-dc.zip</span>
+                  </a>
+                </div>
+                <ol class="guide-list" style="margin-top: 1rem;">
+                  <li>Download and extract the ZIP file on your <strong>Schema Master Domain Controller</strong></li>
+                  <li>Right-click <code>configure-gateproxy-dc.bat</code> and select "Run as Administrator"</li>
+                  <li>The script will:
+                    <ul>
+                      <li>Configure LDAPS (port 636) with certificate binding</li>
+                      <li>Update the Active Directory schema with GateProxy attributes</li>
+                    </ul>
+                  </li>
+                  <li>After the script completes, return here and test the connection again</li>
+                </ol>
+                <p class="muted small" style="margin-top: 0.5rem;">
+                  <strong>Requirements:</strong> You must be logged in as a user who is a member of both <strong>Schema Admins</strong> and <strong>Domain Admins</strong> groups.
+                </p>
               </div>
             </fieldset>
           </div>

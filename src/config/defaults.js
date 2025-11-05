@@ -1,7 +1,7 @@
 export const defaultSettings = {
   site: {
           listenAddress: '0.0.0.0',
-      listenPort: 80,
+      listenPort: 5000,
       httpsPort: 443,
       publicBaseUrl: '',
     sessionHours: 8,
@@ -50,6 +50,12 @@ export const defaultSettings = {
   setup: {
     completed: false,
     completedAt: null
+  },
+  dnsCache: {},
+  discoveredServers: {
+    ldap: [],
+    dns: [],
+    discoveredAt: null
   }
 };
 

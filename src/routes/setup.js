@@ -22,6 +22,13 @@ import {
 
 import { storeSmtpPassword } from '../services/otpService.js';
 import { commandExists } from '../utils/command.js';
+import { 
+  autoDetectDns, 
+  getDiscoveredServers, 
+  resolveIpToHostname,
+  scanSubnetOnStartup
+} from '../services/dnsService.js';
+import { logger } from '../utils/logger.js';
 
 const router = Router();
 
@@ -41,6 +48,8 @@ const upload = multer({
 
 router.get('/api/setup/status', (req, res) => {
   const config = loadConfig();
+  const discoveredServers = getDiscoveredServers();
+  
   res.json({
     completed: config.setup.completed,
     prerequisites: {
@@ -59,8 +68,62 @@ router.get('/api/setup/status', (req, res) => {
     },
     cloudflareConfigured: Boolean(config.cloudflare.certPem) || hasCertificate(),
     smtp: config.smtp,
-    resources: listResources()
+    resources: listResources(),
+    discoveredServers: discoveredServers
   });
+});
+
+// Get discovered servers
+router.get('/api/setup/discovered-servers', (req, res) => {
+  const discovered = getDiscoveredServers();
+  res.json(discovered);
+});
+
+// Trigger subnet scan
+router.post('/api/setup/scan-subnet', async (req, res) => {
+  try {
+    const result = await scanSubnetOnStartup();
+    res.json({ success: true, ...result });
+  } catch (error) {
+    logger.error('Subnet scan failed', { error: error.message });
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Resolve IP to hostname
+router.post('/api/setup/resolve-ip', async (req, res) => {
+  try {
+    const { ip } = req.body;
+    if (!ip || !/^\d+\.\d+\.\d+\.\d+$/.test(ip)) {
+      return res.status(400).json({ error: 'Valid IP address required' });
+    }
+    
+    const hostname = await resolveIpToHostname(ip);
+    
+    if (hostname) {
+      // Extract domain and base DN from hostname
+      const parts = hostname.split('.');
+      let domain = null;
+      let baseDn = null;
+      
+      if (parts.length >= 2) {
+        domain = parts.slice(1).join('.');
+        baseDn = parts.slice(1).map(part => `DC=${part}`).join(',');
+      }
+      
+      res.json({ 
+        success: true, 
+        hostname, 
+        domain, 
+        baseDn 
+      });
+    } else {
+      res.json({ success: false, error: 'Could not resolve IP to hostname' });
+    }
+  } catch (error) {
+    logger.error('IP resolution failed', { error: error.message });
+    res.status(500).json({ error: error.message });
+  }
 });
 
 // Import settings and auto-complete setup if everything is provided
@@ -155,27 +218,81 @@ router.post('/api/setup/import', upload.single('config'), async (req, res) => {
   }
 });
 
+// Auto-detect DNS for LDAP host
+router.post('/api/setup/dns-detect', async (req, res, next) => {
+  try {
+    const { ldapHost } = req.body;
+    
+    if (!ldapHost || !ldapHost.trim()) {
+      return res.status(400).json({ error: 'LDAP host is required' });
+    }
+    
+    const hostname = ldapHost.trim();
+    const result = await autoDetectDns(hostname);
+    
+    res.json(result);
+  } catch (error) {
+    logger.error('DNS detection failed', { error: error.message });
+    res.status(500).json({ 
+      success: false, 
+      error: error.message,
+      ipAddress: null,
+      method: 'error'
+    });
+  }
+});
+
 router.post('/api/setup/ldap', async (req, res, next) => {
   try {
     const {
       domain,
       ldapHost,
-      ldapPort,
       baseDn,
       lookupUser,
       password,
-      useLdaps = true,
-      sessionAttribute,
-      webAuthnAttribute,
       adminGroupDns = []
     } = req.body;
 
-    if (!domain || !ldapHost || !baseDn || !lookupUser || !password) {
-      return res.status(400).json({ error: 'Missing LDAP configuration fields' });
+    if (!ldapHost || !lookupUser || !password) {
+      return res.status(400).json({ error: 'Missing required LDAP configuration fields' });
     }
 
-    await testServiceBind({ domain, ldapHost, ldapPort, lookupUser, useLdaps }, password, {
-      rejectUnauthorized: false
+    // Auto-fill domain and base DN from LDAP host if not provided
+    let finalDomain = domain;
+    let finalBaseDn = baseDn;
+    
+    if (!finalDomain || !finalBaseDn) {
+      const parts = ldapHost.split('.');
+      if (parts.length >= 2) {
+        if (!finalDomain) {
+          finalDomain = parts.slice(1).join('.');
+        }
+        if (!finalBaseDn) {
+          finalBaseDn = parts.slice(1).map(part => `DC=${part}`).join(',');
+        }
+      }
+    }
+
+    if (!finalDomain || !finalBaseDn) {
+      return res.status(400).json({ error: 'Domain name and Base DN are required. They can be auto-filled from LDAP host or set manually in Advanced settings.' });
+    }
+
+    // Get custom ports from form, or use defaults
+    const ldapsPort = req.body.ldapsPort ? Number(req.body.ldapsPort) : 636;
+    const ldapPort = req.body.ldapPort ? Number(req.body.ldapPort) : 389;
+
+    // Auto-detect LDAPS/LDAP: try LDAPS first, fall back to LDAP
+    // testServiceBind with autoDetect=true handles the fallback internally
+    const connectionResult = await testServiceBind({ 
+      domain: finalDomain, 
+      ldapHost, 
+      ldapsPort: ldapsPort, // Custom LDAPS port
+      ldapPort: ldapPort, // Custom LDAP port (for fallback)
+      lookupUser, 
+      useLdaps: true  // Preference (but autoDetect will try both)
+    }, password, {
+      rejectUnauthorized: false,
+      autoDetect: true  // This will try LDAPS first, then fall back to LDAP
     });
 
     const existingAuth = loadConfig().auth;
@@ -184,22 +301,36 @@ router.post('/api/setup/ldap', async (req, res, next) => {
     // Users can add more groups later in the admin settings page
     const defaultAdminGroups = adminGroupDns.length ? adminGroupDns : ['Domain Admins'];
 
+    // Attribute names are fixed by the domain controller schema script
+    // They cannot be changed - must match update-schema-gateproxy.ps1
+    const FIXED_SESSION_ATTR = 'gateProxySession';
+    const FIXED_WEBAUTHN_ATTR = 'gateProxyWebAuthn';
+
+    // Use detected connection settings or defaults
+    const useLdaps = connectionResult?.useLdaps ?? true;
+    const finalLdapPort = connectionResult?.ldapPort ?? (useLdaps ? ldapsPort : ldapPort);
+
     saveConfigSection('auth', {
       ...existingAuth,
-      domain,
+      domain: finalDomain,
       ldapHost,
-      ldapPort: Number(ldapPort) || 636,
+      ldapPort: Number(finalLdapPort),
       useLdaps,
-      baseDn,
+      baseDn: finalBaseDn,
       lookupUser,
-      sessionAttribute: sessionAttribute || 'gateProxySession',
-      webAuthnAttribute: webAuthnAttribute || 'gateProxyWebAuthn',
+      sessionAttribute: FIXED_SESSION_ATTR,
+      webAuthnAttribute: FIXED_WEBAUTHN_ATTR,
       adminGroupDns: defaultAdminGroups
     });
 
     setBindPassword(password);
 
-    res.json({ success: true });
+    res.json({ 
+      success: true, 
+      connectionType: useLdaps ? 'LDAPS' : 'LDAP',
+      port: ldapPort,
+      detected: connectionResult?.detected || false
+    });
   } catch (error) {
     // testServiceBind already parses errors, but double-check for any unparsed errors
     const errorMessage = error.message && !error.message.includes('0x') && !error.message.includes('data ')

@@ -422,8 +422,20 @@ function renderStatusCards() {
     ? `Found (${certStatus.caServer || 'discovered'})`
     : 'Not found';
 
+  // LDAP connection status
+  let ldapStatus = 'Not configured';
+  if (settings.auth?.ldapHost) {
+    const connectionType = settings.auth.useLdaps ? 'LDAPS' : 'LDAP';
+    const port = settings.auth.ldapPort || (settings.auth.useLdaps ? 636 : 389);
+    ldapStatus = `${connectionType} (port ${port})`;
+    if (!settings.auth.useLdaps) {
+      ldapStatus += ' ⚠️ Not encrypted';
+    }
+  }
+
   const cards = [
     { title: 'Public URL', value: settings.site.publicBaseUrl || 'Not configured' },
+    { title: 'LDAP Connection', value: ldapStatus },
     { title: 'Cloudflare Tunnel', value: tunnelStatus },
     { title: 'SSL Certificate', value: certStatusText },
     { title: 'Certificate Authority', value: caStatusText },
@@ -792,6 +804,16 @@ async function loadSettings() {
     if (exposeCheckbox) {
       exposeCheckbox.checked = settings.adminPortal?.exposeToInternet || false;
     }
+    
+    // Load LDAP connection settings
+    const ldapPortInput = settingsForm.querySelector('input[name="ldapPort"]');
+    const useLdapsCheckbox = document.getElementById('useLdaps');
+    if (ldapPortInput) {
+      ldapPortInput.value = settings.auth?.ldapPort || (settings.auth?.useLdaps ? 636 : 389);
+    }
+    if (useLdapsCheckbox) {
+      useLdapsCheckbox.checked = settings.auth?.useLdaps !== false; // Default to true if not set
+    }
 
     adminGroups = (settings.auth.adminGroupDns || []).map((dn) => ({ dn, name: extractNameFromDn(dn) }));
     hydrateAdminGroupSelectors();
@@ -832,7 +854,17 @@ settingsForm?.addEventListener('submit', async (event) => {
   
   try {
     await postJson('/gateProxyAdmin/api/settings/site', payload);
-    await postJson('/gateProxyAdmin/api/settings/auth', { adminGroupDns: payload.adminGroupDns });
+    
+    // Save LDAP connection settings
+    const ldapPortInput = settingsForm.querySelector('input[name="ldapPort"]');
+    const useLdapsCheckbox = document.getElementById('useLdaps');
+    const authPayload = { adminGroupDns: payload.adminGroupDns };
+    if (ldapPortInput && useLdapsCheckbox) {
+      authPayload.ldapPort = Number(ldapPortInput.value) || (useLdapsCheckbox.checked ? 636 : 389);
+      authPayload.useLdaps = useLdapsCheckbox.checked;
+    }
+    await postJson('/gateProxyAdmin/api/settings/auth', authPayload);
+    
     const exposeCheckbox = document.getElementById('exposeToInternet');
     if (exposeCheckbox) {
       await postJson('/gateProxyAdmin/api/settings/adminPortal', { exposeToInternet: exposeCheckbox.checked });

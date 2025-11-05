@@ -36,6 +36,10 @@ const scriptBundles = [
   {
     zipName: 'update-schema-gateproxy.zip',
     files: ['update-schema-gateproxy.ps1', 'update-schema-gateproxy.bat', 'update-schema-gateproxy.txt']
+  },
+  {
+    zipName: 'configure-gateproxy-dc.zip',
+    files: ['configure-gateproxy-dc.ps1', 'configure-gateproxy-dc.bat', 'update-schema-gateproxy.ps1']
   }
 ];
 
@@ -167,6 +171,19 @@ function resolveListenEndpoint(config) {
 async function startServer() {
   bootstrapDirectories();
   ensureScriptArchives();
+  
+  // If setup is not completed, scan subnet for LDAP and DNS servers
+  const initialConfig = loadConfig();
+  if (!initialConfig.setup.completed) {
+    // Run scan in background (don't block server startup)
+    import('./services/dnsService.js').then(({ scanSubnetOnStartup }) => {
+      scanSubnetOnStartup().catch(error => {
+        logger.warn('Background subnet scan failed', { error: error.message });
+      });
+    }).catch(error => {
+      logger.warn('Failed to load DNS service for subnet scan', { error: error.message });
+    });
+  }
 
   const app = express();
 

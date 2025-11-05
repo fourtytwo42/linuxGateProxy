@@ -20,10 +20,39 @@ function escapeFilterValue(value) {
 import tls from 'tls';
 import { loadConfig, getSecret, setSecret } from '../config/index.js';
 import { logger } from '../utils/logger.js';
+import { getCachedHostnameMapping } from './dnsService.js';
 
 function buildUrl({ useLdaps, ldapHost, ldapPort }) {
   const protocol = useLdaps ? 'ldaps' : 'ldap';
-  return `${protocol}://${ldapHost}:${ldapPort}`;
+  
+  // Check if we have a cached IP for this hostname
+  // If DNS fails but we have a cached IP, use it directly
+  const cachedIp = getCachedHostnameMapping(ldapHost);
+  const hostToUse = cachedIp || ldapHost;
+  
+  return `${protocol}://${hostToUse}:${ldapPort}`;
+}
+
+/**
+ * Get TLS options for LDAPS connection
+ * If using cached IP, set servername to original hostname for certificate validation
+ */
+function getTlsOptions(ldapHost, cachedIp, rejectUnauthorized = false) {
+  const options = {
+    rejectUnauthorized,
+    minVersion: 'TLSv1.2'
+  };
+  
+  // If using cached IP, set servername to original hostname for certificate validation
+  if (cachedIp && ldapHost !== cachedIp) {
+    options.servername = ldapHost;
+    logger.debug('Using cached IP with servername for certificate validation', { 
+      ip: cachedIp, 
+      hostname: ldapHost 
+    });
+  }
+  
+  return options;
 }
 
 function getBindPassword() {
@@ -41,16 +70,17 @@ function createClient(config, { rejectUnauthorized = false } = {}) {
   if (!config.auth.ldapHost) {
     throw new Error('LDAP host not configured');
   }
+  
+  const cachedIp = getCachedHostnameMapping(config.auth.ldapHost);
   const options = {
     url: buildUrl(config.auth),
     timeout: 5000
   };
+  
   if (config.auth.useLdaps) {
-    options.tlsOptions = {
-      rejectUnauthorized,
-      minVersion: 'TLSv1.2'
-    };
+    options.tlsOptions = getTlsOptions(config.auth.ldapHost, cachedIp, rejectUnauthorized);
   }
+  
   return new Client(options);
 }
 
@@ -102,8 +132,9 @@ export function parseLdapError(error) {
         '49': 'Invalid credentials. Please check your username and password.',
         '50': 'Insufficient access rights.',
         '51': 'Server is unavailable.',
-        '52': 'Server is unwilling to perform the operation.',
+        '52': 'Server is unwilling to perform the operation (often TLS/SSL initialization error).',
         '53': 'Loop detected.',
+        '8': 'Strong authentication required. The server requires secure connections (LDAPS or STARTTLS).',
         '81': 'Server is unavailable.'
       };
       if (ldapCodes[decimalCode]) {
@@ -115,8 +146,20 @@ export function parseLdapError(error) {
   }
 
   // Check for common error patterns
-  if (message.includes('ECONNREFUSED') || message.includes('ENOTFOUND')) {
-    return 'Cannot connect to LDAP server. Check the LDAP host and port.';
+  if (message.includes('ENOTFOUND') || message.includes('getaddrinfo ENOTFOUND')) {
+    return 'Cannot resolve hostname. Check that the LDAP host name is correct and DNS is working. Try using the IP address if hostname resolution is not available.';
+  }
+  
+  if (message.includes('ECONNREFUSED')) {
+    return 'Connection refused by the server. Check the LDAP host, port, and that the LDAP server is running.';
+  }
+  
+  if (message.includes('ECONNRESET')) {
+    // ECONNRESET with LDAPS often means no certificate is configured on the DC
+    if (message.includes('ldaps') || message.includes('636')) {
+      return 'Connection was reset. LDAPS (port 636) may not be configured on this domain controller yet. Try using port 389 (non-secure LDAP) by disabling "Use secure LDAPS" to test the connection first. After confirming connectivity, configure LDAPS certificate on the DC.';
+    }
+    return 'Connection was reset by the server. When using LDAPS, try using the hostname (not IP address) to match the certificate, or disable LDAPS to test the connection.';
   }
   
   if (message.includes('ETIMEDOUT') || message.includes('timeout')) {
@@ -124,7 +167,15 @@ export function parseLdapError(error) {
   }
   
   if (message.includes('certificate') || message.includes('TLS') || message.includes('SSL')) {
-    return 'TLS/SSL certificate error. Try disabling LDAPS or check certificate settings.';
+    // Check if this is happening on non-LDAPS connection (port 389)
+    // This might indicate the server requires STARTTLS or the client is trying to use it
+    // However, if we're explicitly using plain LDAP, this could be a false positive
+    // Only show this message if we're actually using port 389 and the error is clearly TLS-related
+    if ((message.includes('389') || (!message.includes('636') && !message.includes('ldaps'))) && 
+        (message.includes('TLS') || message.includes('SSL') || message.includes('certificate'))) {
+      return 'TLS/SSL error on port 389. The server may require STARTTLS or the connection is attempting secure negotiation. Try using port 636 with LDAPS enabled, or check if your domain controller requires STARTTLS for port 389.';
+    }
+    return 'TLS/SSL certificate error. When using LDAPS, use the hostname (not IP address) to match the certificate subject name. You can also try disabling LDAPS temporarily to test the connection.';
   }
 
   if (message.includes('AcceptSecurityContext') || message.includes('Invalid credentials') || message.includes('Logon failure')) {
@@ -135,38 +186,206 @@ export function parseLdapError(error) {
   return `LDAP error: ${message.slice(0, 200)}`;
 }
 
-export async function testServiceBind(settings, password, { rejectUnauthorized = true } = {}) {
-  const client = new Client({
-    url: buildUrl({ useLdaps: settings.useLdaps, ldapHost: settings.ldapHost, ldapPort: settings.ldapPort }),
-    timeout: 5000,
-    tlsOptions: settings.useLdaps
-      ? { rejectUnauthorized, minVersion: 'TLSv1.2' }
-      : undefined
-  });
-
-  // Generate username formats to try
-  const usernameFormats = [];
+export async function testServiceBind(settings, password, { rejectUnauthorized = true, autoDetect = false } = {}) {
+  // If autoDetect is true, try LDAPS first, then fall back to LDAP
+  // Otherwise, use the specified useLdaps setting
+  let useLdaps = settings.useLdaps !== undefined ? Boolean(settings.useLdaps) : true; // Default to LDAPS
+  let ldapPort = settings.ldapPort || (useLdaps ? 636 : 389);
+  
+  // Generate username formats to try - be flexible and try multiple variants
+  const usernameFormatsList = [];
   const lookupUser = settings.lookupUser.trim();
   
-  // If username already has @ or \, try it as-is first
-  if (lookupUser.includes('@') || lookupUser.includes('\\')) {
-    usernameFormats.push(lookupUser);
-  } else {
-    // Try plain username first
-    usernameFormats.push(lookupUser);
-    
-    // If domain is available, try UPN format
-    if (settings.domain) {
-      usernameFormats.push(`${lookupUser}@${settings.domain}`);
+  // Always try the input as-is first (user might have entered exact format)
+  usernameFormatsList.push(lookupUser);
+  
+  // Parse the input to extract username and domain parts
+  let usernamePart = lookupUser;
+  let domainPart = null;
+  
+  if (lookupUser.includes('@')) {
+    // UPN format: username@domain.com
+    const parts = lookupUser.split('@');
+    usernamePart = parts[0];
+    domainPart = parts.slice(1).join('@'); // Handle domains with @ in them (unlikely but possible)
+  } else if (lookupUser.includes('\\')) {
+    // Domain\username format
+    const parts = lookupUser.split('\\');
+    if (parts.length >= 2) {
+      domainPart = parts[0];
+      usernamePart = parts.slice(1).join('\\'); // Handle usernames with \ in them (unlikely but possible)
     }
+  }
+  
+  // If we extracted a domain, try variations with the configured domain
+  if (settings.domain && domainPart !== settings.domain) {
+    // Try with configured domain instead of extracted domain
+    usernameFormatsList.push(`${usernamePart}@${settings.domain}`);
     
-    // Try DOMAIN\username format if domain is available
+    const domainNetbios = settings.domain.split('.')[0].toUpperCase();
+    usernameFormatsList.push(`${domainNetbios}\\${usernamePart}`);
+    usernameFormatsList.push(`${settings.domain.split('.')[0].toLowerCase()}\\${usernamePart}`);
+  }
+  
+  // If input was plain username, try all formats
+  if (!lookupUser.includes('@') && !lookupUser.includes('\\')) {
+    // Plain username - try all variants
     if (settings.domain) {
+      usernameFormatsList.push(`${lookupUser}@${settings.domain}`);
+      
       const domainNetbios = settings.domain.split('.')[0].toUpperCase();
-      usernameFormats.push(`${domainNetbios}\\${lookupUser}`);
-      // Also try lowercase
-      usernameFormats.push(`${settings.domain.split('.')[0].toLowerCase()}\\${lookupUser}`);
+      usernameFormatsList.push(`${domainNetbios}\\${lookupUser}`);
+      usernameFormatsList.push(`${settings.domain.split('.')[0].toLowerCase()}\\${lookupUser}`);
     }
+  } else if (domainPart) {
+    // If input had domain, also try plain username (in case domain was wrong)
+    usernameFormatsList.push(usernamePart);
+    
+    // And try with configured domain
+    if (settings.domain) {
+      usernameFormatsList.push(`${usernamePart}@${settings.domain}`);
+      
+      const domainNetbios = settings.domain.split('.')[0].toUpperCase();
+      usernameFormatsList.push(`${domainNetbios}\\${usernamePart}`);
+      usernameFormatsList.push(`${settings.domain.split('.')[0].toLowerCase()}\\${usernamePart}`);
+    }
+  }
+  
+  // Remove duplicates while preserving order (first occurrence wins)
+  const usernameFormats = [];
+  const seen = new Set();
+  for (const format of usernameFormatsList) {
+    if (!seen.has(format)) {
+      seen.add(format);
+      usernameFormats.push(format);
+    }
+  }
+  
+  logger.debug('Trying username formats', { formats: usernameFormats, original: lookupUser });
+
+  // Try LDAPS first if auto-detect is enabled, otherwise use specified setting
+  if (autoDetect) {
+    // Always try LDAPS first on port 636 (or custom LDAPS port)
+    const ldapsPort = settings.ldapsPort || settings.ldapPort || 636;
+    const ldapPortFallback = settings.ldapPort || settings.ldapPortFallback || 389; // LDAP port for fallback
+    
+    logger.debug('Auto-detecting connection: trying LDAPS first', { ldapHost: settings.ldapHost, ldapsPort, ldapPortFallback });
+    
+    // Try LDAPS first
+    const cachedIp = getCachedHostnameMapping(settings.ldapHost);
+    const ldapsClient = new Client({
+      url: buildUrl({ useLdaps: true, ldapHost: settings.ldapHost, ldapPort: ldapsPort }),
+      timeout: 5000,
+      tlsOptions: getTlsOptions(settings.ldapHost, cachedIp, rejectUnauthorized)
+    });
+
+    try {
+      for (const usernameFormat of usernameFormats) {
+        try {
+          await ldapsClient.bind(usernameFormat, password);
+          await ldapsClient.unbind().catch(() => {});
+          // Success with LDAPS!
+          logger.info('LDAPS connection successful', { ldapHost: settings.ldapHost, port: ldapsPort });
+          return { success: true, useLdaps: true, ldapPort: ldapsPort };
+        } catch (error) {
+          // Continue to next username format
+          logger.debug('LDAPS bind failed with username format, trying next', { format: usernameFormat, error: error.message });
+        }
+      }
+      await ldapsClient.unbind().catch(() => {});
+    } catch (ldapsError) {
+      // LDAPS connection or all bind attempts failed
+      logger.debug('LDAPS connection failed, will fall back to LDAP', { error: ldapsError.message, code: ldapsError.code });
+    } finally {
+      // Ensure client is closed
+      try {
+        await ldapsClient.unbind().catch(() => {});
+      } catch (e) {
+        // Ignore unbind errors
+      }
+    }
+    
+    // LDAPS failed, try STARTTLS on port 389 (ldap:// with TLS upgrade)
+    logger.info('LDAPS failed, trying STARTTLS on port 389', { ldapHost: settings.ldapHost, port: ldapPortFallback });
+    
+    const cachedIpFallback = getCachedHostnameMapping(settings.ldapHost);
+    const starttlsTlsOptions = getTlsOptions(settings.ldapHost, cachedIpFallback, rejectUnauthorized);
+    const starttlsClient = new Client({
+      url: buildUrl({ useLdaps: false, ldapHost: settings.ldapHost, ldapPort: ldapPortFallback }),
+      timeout: 5000
+    });
+    
+    try {
+      // StartTLS: connect with ldap:// then upgrade to TLS
+      await starttlsClient.startTLS(starttlsTlsOptions);
+      logger.debug('STARTTLS upgrade successful');
+      
+      // Try binding with STARTTLS
+      for (const usernameFormat of usernameFormats) {
+        try {
+          await starttlsClient.bind(usernameFormat, password);
+          await starttlsClient.unbind().catch(() => {});
+          // Success with STARTTLS!
+          logger.info('STARTTLS connection successful', { ldapHost: settings.ldapHost, port: ldapPortFallback });
+          return { success: true, useLdaps: false, ldapPort: ldapPortFallback, starttls: true };
+        } catch (error) {
+          logger.debug('STARTTLS bind failed with username format, trying next', { format: usernameFormat, error: error.message });
+        }
+      }
+      await starttlsClient.unbind().catch(() => {});
+    } catch (starttlsError) {
+      logger.warn('STARTTLS failed', { 
+        error: starttlsError.message, 
+        code: starttlsError.code,
+        ldapHost: settings.ldapHost 
+      });
+      await starttlsClient.unbind().catch(() => {});
+      
+      // If STARTTLS fails with code 52 (TLS initialization error), the DC likely doesn't have LDAPS configured
+      if (starttlsError.code === 52 || starttlsError.message?.includes('Error initializing SSL/TLS')) {
+        logger.error('STARTTLS failed due to TLS/SSL initialization error. LDAPS certificate may not be configured on this domain controller.', {
+          ldapHost: settings.ldapHost,
+          error: starttlsError.message
+        });
+        // Don't try plain LDAP - it will fail with code 8 (requires secure connection)
+        throw new Error('LDAPS certificate is not properly configured on this domain controller. The server requires secure connections but cannot initialize TLS/SSL. Download and run the configure-gateproxy-dc.zip script on your domain controller to configure LDAPS and update the schema.');
+      }
+    }
+    
+    // If STARTTLS also fails, try plain LDAP (no TLS) as last resort
+    logger.info('Falling back to plain LDAP (no TLS)', { ldapHost: settings.ldapHost, port: ldapPortFallback });
+    useLdaps = false;
+    ldapPort = ldapPortFallback;
+  }
+
+  // Try the specified protocol (or LDAP if auto-detect fell back)
+  const cachedIp = getCachedHostnameMapping(settings.ldapHost);
+  
+  // Ensure we're using plain LDAP (no TLS) when useLdaps is false
+  const clientUrl = buildUrl({ useLdaps, ldapHost: settings.ldapHost, ldapPort });
+  logger.debug('Creating LDAP client', { url: clientUrl, useLdaps, ldapPort });
+  
+  const clientOptions = {
+    url: clientUrl,
+    timeout: 5000
+  };
+  
+  // Only add tlsOptions if we're using LDAPS
+  if (useLdaps) {
+    clientOptions.tlsOptions = getTlsOptions(settings.ldapHost, cachedIp, rejectUnauthorized);
+  } else {
+    // Explicitly ensure no TLS options for plain LDAP
+    // Don't set tlsOptions at all for plain LDAP connections
+    clientOptions.tlsOptions = undefined;
+  }
+  
+  let client;
+  try {
+    client = new Client(clientOptions);
+    logger.debug('LDAP client created successfully', { url: clientUrl, useLdaps, hasTlsOptions: !!clientOptions.tlsOptions });
+  } catch (clientError) {
+    logger.error('Failed to create LDAP client', { error: clientError.message, url: clientUrl, useLdaps });
+    throw new Error(`Failed to create LDAP client: ${clientError.message}`);
   }
 
   let lastError = null;
@@ -175,20 +394,45 @@ export async function testServiceBind(settings, password, { rejectUnauthorized =
   try {
     for (const usernameFormat of usernameFormats) {
       try {
+        logger.debug('Attempting LDAP bind', { format: usernameFormat, useLdaps, port: ldapPort, url: clientUrl });
         await client.bind(usernameFormat, password);
         bound = true;
-        // Success! Return true (will unbind in finally)
-        return true;
+        // Success! Return with protocol info
+        logger.info('LDAP bind successful', { format: usernameFormat, useLdaps, port: ldapPort });
+        const result = { success: true, useLdaps, ldapPort };
+        if (autoDetect) {
+          result.detected = true;
+        }
+        return result;
       } catch (error) {
         lastError = error;
+        logger.debug('LDAP bind failed with username format', { 
+          format: usernameFormat, 
+          error: error.message, 
+          code: error.code,
+          stack: error.stack?.split('\n')[0]
+        });
         // Bind failed, continue to next format (no need to unbind after failed bind)
       }
     }
 
     // All formats failed, throw the last error with parsed message
     if (lastError) {
-      const friendlyError = new Error(parseLdapError(lastError));
+      logger.warn('All LDAP bind attempts failed', { useLdaps, ldapPort, lastError: lastError.message, code: lastError.code });
+      // Enhance error message if using LDAPS and got ECONNRESET
+      let errorMessage = parseLdapError(lastError);
+      
+      // If we're using plain LDAP (not LDAPS) and got a TLS error, provide specific guidance
+      if (!useLdaps && (lastError.message?.includes('TLS') || lastError.message?.includes('SSL') || lastError.message?.includes('certificate'))) {
+        errorMessage = 'The LDAP server on port 389 may require STARTTLS. Try using LDAPS on port 636 instead, or configure STARTTLS support.';
+      } else if (useLdaps && (lastError.message?.includes('ECONNRESET') || lastError.code === 'ECONNRESET')) {
+        errorMessage = 'Connection was reset. LDAPS (port 636) may not be configured on this domain controller yet. Falling back to LDAP (port 389)...';
+      }
+      
+      const friendlyError = new Error(errorMessage);
       friendlyError.originalError = lastError;
+      friendlyError.useLdaps = useLdaps;
+      friendlyError.ldapPort = ldapPort;
       throw friendlyError;
     }
 

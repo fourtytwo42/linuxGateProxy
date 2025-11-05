@@ -154,13 +154,75 @@ function applyStatus(status, { updateForms = false } = {}) {
     return;
   }
   if (status.auth) {
-    ldapForm.domain.value = status.auth.domain || '';
-    ldapForm.ldapHost.value = status.auth.ldapHost || '';
-    ldapForm.ldapPort.value = status.auth.ldapPort || 636;
-    ldapForm.baseDn.value = status.auth.baseDn || '';
+    const ldapHostInput = ldapForm.querySelector('#ldapHostInput');
+    const domainInput = ldapForm.querySelector('#domainInput');
+    const baseDnInput = ldapForm.querySelector('#baseDnInput');
+    
+    if (ldapHostInput) {
+      ldapHostInput.value = status.auth.ldapHost || '';
+      // Auto-fill domain and base DN if host is set (function defined later)
+      if (status.auth.ldapHost && typeof autoFillFromHost === 'function') {
+        autoFillFromHost(status.auth.ldapHost);
+      } else if (status.auth.ldapHost) {
+        // Fallback: manually extract if function not yet defined
+        const parts = status.auth.ldapHost.split('.');
+        if (parts.length >= 2 && domainInput && baseDnInput) {
+          const domain = parts.slice(1).join('.');
+          const baseDn = parts.slice(1).map(part => `DC=${part}`).join(',');
+          if (!domainInput.value) domainInput.value = domain;
+          if (!baseDnInput.value) baseDnInput.value = baseDn;
+        }
+      }
+    }
+    
+    // Set port fields if configured
+    const ldapsPortInput = ldapForm.querySelector('input[name="ldapsPort"]');
+    const ldapPortInput = ldapForm.querySelector('input[name="ldapPort"]');
+    
+    // The saved ldapPort is the active port (could be 636 for LDAPS or 389 for LDAP)
+    // We need to be smart about which field to populate
+    if (ldapsPortInput && ldapPortInput) {
+      if (status.auth?.useLdaps) {
+        // Using LDAPS - active port is LDAPS port
+        if (status.auth.ldapPort && status.auth.ldapPort !== 389) {
+          // Saved port is likely 636, use it for LDAPS port field
+          ldapsPortInput.value = status.auth.ldapPort;
+        }
+        // LDAP port field should stay at default 389
+        ldapPortInput.value = 389;
+      } else {
+        // Using LDAP - active port is LDAP port
+        if (status.auth.ldapPort && status.auth.ldapPort !== 636) {
+          // Saved port is likely 389, use it for LDAP port field
+          ldapPortInput.value = status.auth.ldapPort;
+        } else {
+          // Ensure default is 389
+          ldapPortInput.value = 389;
+        }
+        // LDAPS port field should stay at default 636
+        ldapsPortInput.value = 636;
+      }
+    }
+    
+    // Show connection status if configured
+    if (status.auth.useLdaps !== undefined && status.auth.ldapPort) {
+      const connectionType = status.auth.useLdaps ? 'LDAPS' : 'LDAP';
+      updateConnectionStatus(connectionType, status.auth.ldapPort);
+    }
+    
+    // Set domain and base DN if they were manually set (not auto-filled)
+    if (domainInput && status.auth.domain) {
+      domainInput.value = status.auth.domain;
+      domainInput.dataset.autoFilled = 'false';
+    }
+    if (baseDnInput && status.auth.baseDn) {
+      baseDnInput.value = status.auth.baseDn;
+      baseDnInput.dataset.autoFilled = 'false';
+    }
+    
     ldapForm.lookupUser.value = status.auth.lookupUser || '';
-    ldapForm.sessionAttribute.value = status.auth.sessionAttribute || 'gateProxySession';
-    ldapForm.webAuthnAttribute.value = status.auth.webAuthnAttribute || 'gateProxyWebAuthn';
+    // sessionAttribute and webAuthnAttribute are fixed values set by the domain controller script
+    // They are not displayed in the UI and cannot be changed
     // allowedGroupDns removed - access control is now per-resource
     // Admin groups - Domain Admins is set as default on the server
     setupState.ldap = { ...status.auth };
@@ -313,22 +375,387 @@ prereqContinueButton?.addEventListener('click', () => {
 });
 
 // Step 2 - LDAP
+const ldapHostSelect = ldapForm?.querySelector('#ldapHostSelect');
+const ldapHostInput = ldapForm?.querySelector('#ldapHostInput');
+const ldapHostHint = ldapForm?.querySelector('#ldapHostHint');
+const domainInput = ldapForm?.querySelector('#domainInput');
+const baseDnInput = ldapForm?.querySelector('#baseDnInput');
+const advancedToggle = ldapForm?.querySelector('#domainAdvancedToggle');
+const advancedSection = ldapForm?.querySelector('#domainAdvanced');
+const connectionStatus = ldapForm?.querySelector('#ldapConnectionStatus');
+const statusIndicator = connectionStatus?.querySelector('.status-indicator');
+const statusText = connectionStatus?.querySelector('.status-text');
+
+// Function to extract domain and base DN from LDAP host
+function autoFillFromHost(hostname) {
+  if (!hostname || !hostname.trim()) return;
+  
+  // Extract domain from hostname (e.g., dc01.example.com -> example.com)
+  // Remove the first part (DC name) and get the rest
+  const parts = hostname.split('.');
+  if (parts.length >= 2) {
+    const domain = parts.slice(1).join('.');
+    const baseDn = parts.slice(1).map(part => `DC=${part}`).join(',');
+    
+    // Only auto-fill if fields are empty or haven't been manually edited
+    if (domainInput && (!domainInput.value || domainInput.dataset.autoFilled === 'true')) {
+      domainInput.value = domain;
+      domainInput.dataset.autoFilled = 'true';
+    }
+    if (baseDnInput && (!baseDnInput.value || baseDnInput.dataset.autoFilled === 'true')) {
+      baseDnInput.value = baseDn;
+      baseDnInput.dataset.autoFilled = 'true';
+    }
+  }
+}
+
+// Load and populate discovered servers dropdown
+async function loadDiscoveredServers() {
+  if (!ldapHostSelect) return;
+  
+  try {
+    const status = await getJson('/api/setup/status');
+    const discovered = status.discoveredServers || { ldap: [], dns: [] };
+    
+    // Clear existing options except the first one
+    while (ldapHostSelect.options.length > 1) {
+      ldapHostSelect.remove(1);
+    }
+    
+    // Add discovered LDAP servers
+    if (discovered.ldap && discovered.ldap.length > 0) {
+      discovered.ldap.forEach(server => {
+        const option = document.createElement('option');
+        const displayName = server.hostname || server.ip;
+        const portLabel = server.port === 636 ? 'LDAPS' : 'LDAP';
+        option.value = server.hostname || server.ip;
+        option.textContent = `${displayName} (${portLabel}, ${server.domain || 'unknown domain'})`;
+        option.dataset.serverIp = server.ip;
+        option.dataset.serverHostname = server.hostname || '';
+        option.dataset.serverDomain = server.domain || '';
+        option.dataset.serverBaseDn = server.baseDn || '';
+        ldapHostSelect.appendChild(option);
+      });
+      
+      if (ldapHostHint) {
+        ldapHostHint.textContent = `${discovered.ldap.length} server(s) discovered on your network`;
+      }
+    } else {
+      if (ldapHostHint) {
+        ldapHostHint.textContent = 'Enter hostname or IP address';
+      }
+    }
+  } catch (error) {
+    console.error('Failed to load discovered servers', error);
+    if (ldapHostHint) {
+      ldapHostHint.textContent = 'Enter hostname or IP address';
+    }
+  }
+}
+
+// Handle dropdown selection
+if (ldapHostSelect) {
+  ldapHostSelect.addEventListener('change', (event) => {
+    const selectedOption = event.target.options[event.target.selectedIndex];
+    if (selectedOption && selectedOption.value) {
+      const hostname = selectedOption.dataset.serverHostname || selectedOption.value;
+      const domain = selectedOption.dataset.serverDomain;
+      const baseDn = selectedOption.dataset.serverBaseDn;
+      
+      // Set the input field
+      if (ldapHostInput) {
+        ldapHostInput.value = hostname;
+        ldapHostInput.required = true;
+      }
+      
+      // Auto-fill domain and base DN if available
+      if (domain && domainInput) {
+        domainInput.value = domain;
+        domainInput.dataset.autoFilled = 'true';
+      }
+      if (baseDn && baseDnInput) {
+        baseDnInput.value = baseDn;
+        baseDnInput.dataset.autoFilled = 'true';
+      }
+      
+      // Trigger DNS detection
+      if (hostname) {
+        detectDnsForHost(hostname);
+      }
+    }
+  });
+}
+
+// Handle manual input (check if it's an IP and resolve it)
+async function handleLdapHostInput(value) {
+  if (!value || !value.trim()) return;
+  
+  const trimmed = value.trim();
+  
+  // Check if it's an IP address
+  if (/^\d+\.\d+\.\d+\.\d+$/.test(trimmed)) {
+    // It's an IP - try to resolve it to hostname
+    try {
+      const result = await postJson('/api/setup/resolve-ip', { ip: trimmed });
+      if (result.success && result.hostname) {
+        // Resolved successfully - update input with hostname
+        if (ldapHostInput) {
+          ldapHostInput.value = result.hostname;
+        }
+        
+        // Auto-fill domain and base DN if available
+        if (result.domain && domainInput) {
+          domainInput.value = result.domain;
+          domainInput.dataset.autoFilled = 'true';
+        }
+        if (result.baseDn && baseDnInput) {
+          baseDnInput.value = result.baseDn;
+          baseDnInput.dataset.autoFilled = 'true';
+        }
+        
+        // Auto-fill from resolved hostname
+        autoFillFromHost(result.hostname);
+      } else {
+        // Could not resolve - use IP as-is and try to extract domain from any discovered server
+        autoFillFromHost(trimmed);
+      }
+    } catch (error) {
+      // Resolution failed - use IP as-is
+      autoFillFromHost(trimmed);
+    }
+  } else {
+    // It's a hostname - auto-fill domain and base DN
+    autoFillFromHost(trimmed);
+  }
+}
+
+// Auto-detect DNS when LDAP host changes
+async function detectDnsForHost(hostname) {
+  if (!hostname || !hostname.trim()) {
+    if (connectionStatus) {
+      connectionStatus.style.display = 'none';
+    }
+    return;
+  }
+  
+  // Show detecting status
+  if (connectionStatus) {
+    connectionStatus.style.display = 'flex';
+    statusIndicator.className = 'status-indicator status-connecting';
+    statusText.textContent = 'Detecting DNS...';
+  }
+  
+  try {
+    const result = await postJson('/api/setup/dns-detect', { ldapHost: hostname });
+    
+    if (result.success && result.ipAddress) {
+      // DNS detection successful
+      const methodText = {
+        'cached': 'Using cached DNS mapping',
+        'dns_resolution': 'Resolved via DNS',
+        'connection_detection': 'Detected via connection',
+        'connection_detection_and_cache': 'Detected and cached',
+        'subnet_discovery': 'Discovered via subnet scan',
+        'subnet_discovery_and_cache': 'Discovered via subnet scan and cached',
+        'ip_address': 'IP address provided'
+      }[result.method] || 'DNS configured';
+      
+      statusIndicator.className = 'status-indicator status-secure';
+      statusText.textContent = `${methodText} (${result.ipAddress})`;
+      
+      // Auto-fill domain and base DN
+      autoFillFromHost(hostname);
+    } else {
+      // DNS detection failed
+      statusIndicator.className = 'status-indicator status-insecure';
+      statusText.textContent = 'DNS detection failed - will try during connection test';
+    }
+  } catch (error) {
+    // DNS detection error - don't show error, just hide status
+    // Connection test will handle errors
+    if (connectionStatus) {
+      connectionStatus.style.display = 'none';
+    }
+  }
+}
+
+// Auto-fill domain and base DN when LDAP host changes
+if (ldapHostInput) {
+  let dnsDetectionTimeout = null;
+  
+  ldapHostInput.addEventListener('input', (event) => {
+    const value = event.target.value.trim();
+    
+    // Clear dropdown selection when user types manually
+    if (ldapHostSelect) {
+      ldapHostSelect.value = '';
+    }
+    
+    // Handle IP or hostname
+    handleLdapHostInput(value);
+    
+    // Debounce DNS detection (wait 500ms after user stops typing)
+    if (dnsDetectionTimeout) {
+      clearTimeout(dnsDetectionTimeout);
+    }
+    
+    dnsDetectionTimeout = setTimeout(() => {
+      if (value) {
+        detectDnsForHost(value);
+      }
+    }, 500);
+  });
+  
+  // Also auto-detect on blur if not already detected
+  ldapHostInput.addEventListener('blur', (event) => {
+    const value = event.target.value.trim();
+    if (value) {
+      // Clear any pending timeout
+      if (dnsDetectionTimeout) {
+        clearTimeout(dnsDetectionTimeout);
+      }
+      handleLdapHostInput(value);
+      detectDnsForHost(value);
+    }
+  });
+}
+
+// Load discovered servers when step 2 is shown
+if (ldapForm) {
+  const observer = new MutationObserver(() => {
+    if (ldapForm.style.display !== 'none') {
+      loadDiscoveredServers();
+    }
+  });
+  
+  observer.observe(ldapForm, { attributes: true, attributeFilter: ['style'] });
+  
+  // Also load immediately if form is already visible
+  if (ldapForm.style.display !== 'none') {
+    loadDiscoveredServers();
+  }
+}
+
+// Mark fields as manually edited when user types
+if (domainInput) {
+  domainInput.addEventListener('input', () => {
+    domainInput.dataset.autoFilled = 'false';
+  });
+}
+
+if (baseDnInput) {
+  baseDnInput.addEventListener('input', () => {
+    baseDnInput.dataset.autoFilled = 'false';
+  });
+}
+
+// Toggle advanced section
+if (advancedToggle && advancedSection) {
+  advancedToggle.addEventListener('click', () => {
+    const isExpanded = advancedToggle.getAttribute('aria-expanded') === 'true';
+    advancedSection.style.display = isExpanded ? 'none' : 'flex';
+    advancedToggle.setAttribute('aria-expanded', !isExpanded);
+  });
+  
+  // Set initial state
+  advancedToggle.setAttribute('aria-expanded', 'false');
+}
+
+// Update connection status indicator
+function updateConnectionStatus(type, port) {
+  if (!connectionStatus || !statusIndicator || !statusText) return;
+  
+  connectionStatus.style.display = 'flex';
+  statusIndicator.className = 'status-indicator';
+  
+  if (type === 'LDAPS') {
+    statusIndicator.classList.add('status-secure');
+    statusText.textContent = `Connected via LDAPS (port ${port})`;
+  } else if (type === 'LDAP') {
+    statusIndicator.classList.add('status-insecure');
+    statusText.textContent = `Connected via LDAP (port ${port}) - Not encrypted`;
+  }
+}
+
 ldapForm.addEventListener('submit', async (event) => {
   event.preventDefault();
   clearAlert();
   const form = event.target;
   const payload = serializeForm(form);
-  payload.useLdaps = !!payload.useLdaps;
+  
+  // Auto-fill domain and base DN if not provided but LDAP host is set
+  if (!payload.domain && payload.ldapHost) {
+    const parts = payload.ldapHost.split('.');
+    if (parts.length >= 2) {
+      payload.domain = parts.slice(1).join('.');
+    }
+  }
+  if (!payload.baseDn && payload.ldapHost) {
+    const parts = payload.ldapHost.split('.');
+    if (parts.length >= 2) {
+      payload.baseDn = parts.slice(1).map(part => `DC=${part}`).join(',');
+    }
+  }
+  
   // allowedGroupDns removed - access control is now per-resource
   // Admin groups - Domain Admins will be set as default on the server if not provided
   payload.adminGroupDns = [];
 
+  // Show connecting status
+  if (connectionStatus) {
+    connectionStatus.style.display = 'flex';
+    statusIndicator.className = 'status-indicator status-connecting';
+    statusText.textContent = 'Testing connection (trying LDAPS first, then LDAP)...';
+  }
+
   try {
-    await postJson('/api/setup/ldap', payload);
+    const result = await postJson('/api/setup/ldap', payload);
     setupState.ldap = payload;
+    
+    // Hide LDAPS config notice if connection succeeded
+    const ldapsNotice = ldapForm?.querySelector('#ldapsConfigNotice');
+    if (ldapsNotice) {
+      ldapsNotice.style.display = 'none';
+    }
+    
+    // Update status with connection info
+    if (result.connectionType) {
+      updateConnectionStatus(result.connectionType, result.port);
+    }
+    
     showStep(5);
   } catch (error) {
-    showAlert(error.message);
+    // Hide status on error
+    if (connectionStatus) {
+      connectionStatus.style.display = 'none';
+    }
+    
+    // Check if this is an LDAPS configuration error
+    const errorMessage = error.message || '';
+    const isLdapsError = errorMessage.includes('LDAPS certificate') || 
+                         errorMessage.includes('TLS/SSL initialization') ||
+                         errorMessage.includes('Error initializing SSL/TLS') ||
+                         errorMessage.includes('code 52') ||
+                         errorMessage.includes('Code: 0x34');
+    
+    if (isLdapsError) {
+      // Show the LDAPS configuration notice
+      const ldapsNotice = ldapForm?.querySelector('#ldapsConfigNotice');
+      if (ldapsNotice) {
+        ldapsNotice.style.display = 'block';
+        // Scroll notice into view
+        ldapsNotice.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+      }
+      // Still show the error message
+      showAlert(error.message);
+    } else {
+      // Hide LDAPS notice for other errors
+      const ldapsNotice = ldapForm?.querySelector('#ldapsConfigNotice');
+      if (ldapsNotice) {
+        ldapsNotice.style.display = 'none';
+      }
+      showAlert(error.message);
+    }
   }
 });
 

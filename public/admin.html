@@ -168,6 +168,22 @@
                 </div>
 
                 <div class="settings-group">
+                  <h4>LDAP Connection</h4>
+                  <div class="field-grid">
+                    <label>
+                      <span>LDAP Port</span>
+                      <input name="ldapPort" type="number" placeholder="636" />
+                      <small>636 for LDAPS (secure), 389 for LDAP (non-secure)</small>
+                    </label>
+                    <label class="toggle">
+                      <input type="checkbox" name="useLdaps" id="useLdaps" />
+                      <span>Use secure LDAPS</span>
+                    </label>
+                  </div>
+                  <p class="help">Auto-detected during setup. You can manually configure if needed. LDAPS is recommended for production.</p>
+                </div>
+
+                <div class="settings-group">
                   <h4>Admin Group DNs</h4>
                   <div class="group-selector">
                     <div class="selector-controls">
