@@ -1,7 +1,5 @@
 import httpProxy from 'http-proxy';
-import { loadConfig } from '../config/index.js';
 import { logger } from '../utils/logger.js';
-import { userHasGroup } from './ldapService.js';
 
 const proxy = httpProxy.createProxyServer({
   changeOrigin: true,
@@ -48,16 +46,6 @@ proxy.on('proxyRes', (proxyRes, req, res) => {
 });
 
 export function proxyRequest(req, res, next, target) {
-  // Check if user is admin for overlay injection
-  let isAdmin = false;
-  if (req.auth?.user) {
-    const config = loadConfig();
-    const adminGroups = (config.adminPortal?.allowedGroupDns?.length
-      ? config.adminPortal.allowedGroupDns
-      : config.auth.adminGroupDns) || [];
-    isAdmin = userHasGroup(req.auth.user, adminGroups);
-    req.auth.isAdmin = isAdmin;
-  }
   if (!target) {
     logger.error('Proxy target not configured', { url: req.url, originalUrl: req.originalUrl });
     res.status(500).json({ error: 'Proxy target not configured' });
