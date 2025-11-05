@@ -77,21 +77,51 @@ if (-not $SkipLDAPS) {
         
         if ($certificates.Count -eq 0) {
             Write-Host ""
-            Write-Host "WARNING: No suitable certificate found for LDAPS." -ForegroundColor Yellow
+            Write-Host "No suitable certificate found. Creating self-signed certificate for LDAPS..." -ForegroundColor Yellow
             Write-Host ""
-            Write-Host "LDAPS requires a certificate that:" -ForegroundColor Cyan
-            Write-Host "  - Is in the Local Machine Personal store" -ForegroundColor White
-            Write-Host "  - Has a private key" -ForegroundColor White
-            Write-Host "  - Contains the DC's FQDN in Subject or Subject Alternative Name" -ForegroundColor White
-            Write-Host "  - Is not expired" -ForegroundColor White
-            Write-Host ""
-            Write-Host "Options:" -ForegroundColor Cyan
-            Write-Host "  1. Request a certificate from your Enterprise CA" -ForegroundColor White
-            Write-Host "  2. Use the Domain Controller certificate (auto-generated)" -ForegroundColor White
-            Write-Host "  3. Import a certificate with the DC's FQDN" -ForegroundColor White
-            Write-Host ""
-            Write-Host "Skipping LDAPS configuration. You can configure it manually later." -ForegroundColor Yellow
-            Write-Host ""
+            
+            try {
+                # Get DC FQDN
+                $dcFqdn = $env:COMPUTERNAME + "." + (Get-WmiObject Win32_ComputerSystem).Domain
+                $dcShortName = $env:COMPUTERNAME
+                
+                # Create a self-signed certificate for the DC
+                $certParams = @{
+                    DnsName = @($dcFqdn, $dcShortName)
+                    CertStoreLocation = 'Cert:\LocalMachine\My'
+                    KeyUsage = 'DigitalSignature', 'KeyEncipherment'
+                    KeyAlgorithm = 'RSA'
+                    KeyLength = 2048
+                    HashAlgorithm = 'SHA256'
+                    NotAfter = (Get-Date).AddYears(5)
+                    Type = 'SSLServerAuthentication'
+                    FriendlyName = "LDAPS Certificate for $dcFqdn"
+                }
+                
+                $selectedCert = New-SelfSignedCertificate @certParams
+                
+                Write-Host "Self-signed certificate created successfully:" -ForegroundColor Green
+                Write-Host "  Subject: $($selectedCert.Subject)" -ForegroundColor White
+                Write-Host "  Thumbprint: $($selectedCert.Thumbprint)" -ForegroundColor White
+                Write-Host "  Expires: $($selectedCert.NotAfter)" -ForegroundColor White
+                Write-Host ""
+                Write-Host "NOTE: This is a self-signed certificate. For production, use a certificate from your Enterprise CA." -ForegroundColor Yellow
+                Write-Host ""
+                
+            } catch {
+                Write-Host "ERROR: Failed to create self-signed certificate: $($_.Exception.Message)" -ForegroundColor Red
+                Write-Host ""
+                Write-Host "LDAPS requires a certificate that:" -ForegroundColor Cyan
+                Write-Host "  - Is in the Local Machine Personal store" -ForegroundColor White
+                Write-Host "  - Has a private key" -ForegroundColor White
+                Write-Host "  - Contains the DC's FQDN in Subject or Subject Alternative Name" -ForegroundColor White
+                Write-Host "  - Is not expired" -ForegroundColor White
+                Write-Host ""
+                Write-Host "Please obtain a certificate manually and rerun this script." -ForegroundColor Yellow
+                Write-Host ""
+                $script:SkipLDAPS = $true
+                return
+            }
         } else {
             # Use the first suitable certificate or the one with the DC's hostname
             $dcHostname = $env:COMPUTERNAME + "." + (Get-WmiObject Win32_ComputerSystem).Domain
