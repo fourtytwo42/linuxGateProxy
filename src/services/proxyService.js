@@ -49,21 +49,35 @@ proxy.on('proxyRes', (proxyRes, req, res) => {
   // Inject admin overlay script for HTML responses if user is admin
   const contentType = proxyRes.headers['content-type'] || '';
   if (contentType.includes('text/html') && req.auth?.isAdmin) {
+    logger.debug('Injecting admin overlay for HTML response', { url: req.url });
+    
     // Store chunks to inject script before </body>
     let chunks = [];
-    const originalWrite = res.write.bind(res);
-    const originalEnd = res.end.bind(res);
+    let injected = false;
     
-    res.write = function(chunk) {
-      if (chunk) chunks.push(chunk);
+    // Override the write method to capture chunks
+    const originalWrite = res.write.bind(res);
+    res.write = function(chunk, encoding, callback) {
+      if (chunk) {
+        chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk, encoding));
+      }
+      // Don't write yet - we'll write everything at once in end()
       return true;
     };
     
-    res.end = function(chunk) {
-      if (chunk) chunks.push(chunk);
+    // Override the end method to inject script before sending
+    const originalEnd = res.end.bind(res);
+    res.end = function(chunk, encoding, callback) {
+      if (injected) {
+        return originalEnd.call(this, chunk, encoding, callback);
+      }
+      
+      if (chunk) {
+        chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk, encoding));
+      }
       
       // Combine all chunks
-      let body = Buffer.concat(chunks).toString('utf8');
+      const body = Buffer.concat(chunks).toString('utf8');
       
       // Inject admin overlay script before </body> or at end if no body tag
       const overlayScript = `
@@ -72,24 +86,27 @@ window.GateProxyAdminOverlay = true;
 </script>
 <script src="/assets/js/admin-overlay.js"></script>`;
       
+      let modifiedBody = body;
       if (body.includes('</body>')) {
-        body = body.replace('</body>', overlayScript + '\n</body>');
+        modifiedBody = body.replace('</body>', overlayScript + '\n</body>');
       } else if (body.includes('</html>')) {
-        body = body.replace('</html>', overlayScript + '\n</html>');
+        modifiedBody = body.replace('</html>', overlayScript + '\n</html>');
       } else {
-        body += overlayScript;
+        modifiedBody = body + overlayScript;
       }
       
       // Update content length
-      const newBody = Buffer.from(body, 'utf8');
+      const newBody = Buffer.from(modifiedBody, 'utf8');
       res.setHeader('Content-Length', newBody.length);
       
       // Remove content-encoding if present (we've modified the body)
       res.removeHeader('Content-Encoding');
+      res.removeHeader('content-encoding');
+      
+      injected = true;
       
       // Write the modified body
-      originalWrite(newBody);
-      originalEnd();
+      originalEnd.call(this, newBody, encoding, callback);
     };
   }
 });
