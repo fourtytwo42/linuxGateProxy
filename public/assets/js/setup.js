@@ -315,7 +315,16 @@ document.querySelectorAll('button[data-action="prev"]').forEach((button) => {
     const currentIndex = validSteps.indexOf(currentStep);
     
     if (currentIndex > 0) {
-      const prevStep = validSteps[currentIndex - 1];
+      let prevStep = validSteps[currentIndex - 1];
+      
+      // If going back from Resources (step 6) and Cloudflare was already authenticated,
+      // skip Cloudflare (step 5) and go directly to Portal settings (step 3)
+      if (currentStep === 6 && setupState.cloudflare?.configured) {
+        // Check if we actually saw Cloudflare step or skipped it
+        // If configured is true, we likely skipped it, so go back to step 3
+        prevStep = 3;
+      }
+      
       showStep(prevStep);
     }
   });
