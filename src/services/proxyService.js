@@ -52,11 +52,25 @@ proxy.on('proxyRes', (proxyRes, req, res) => {
   if (contentType.includes('text/html') && req.auth?.isAdmin) {
     logger.debug('Injecting admin overlay for HTML response', { url: req.url });
     
+    // Pause the stream immediately to prevent automatic piping
+    proxyRes.pause();
+    
     // Remove content-encoding header since we'll modify the body
     delete proxyRes.headers['content-encoding'];
     delete proxyRes.headers['Content-Encoding'];
     delete proxyRes.headers['transfer-encoding'];
     delete proxyRes.headers['Transfer-Encoding'];
+    
+    // Copy headers to response (except content-length which we'll update)
+    res.statusCode = proxyRes.statusCode;
+    res.statusMessage = proxyRes.statusMessage;
+    Object.keys(proxyRes.headers).forEach((key) => {
+      if (key.toLowerCase() !== 'content-length' && 
+          key.toLowerCase() !== 'content-encoding' &&
+          key.toLowerCase() !== 'transfer-encoding') {
+        res.setHeader(key, proxyRes.headers[key]);
+      }
+    });
     
     // Use a transform stream to collect and modify the body
     let bodyBuffer = Buffer.alloc(0);
@@ -103,11 +117,21 @@ window.GateProxyAdminOverlay = true;
       }
     });
     
-    // Pipe proxyRes through transform to res
-    proxyRes.pipe(transform).pipe(res);
+    // Set up error handlers
+    transform.on('error', (error) => {
+      logger.error('Transform stream error', { error: error.message });
+      res.statusCode = 500;
+      res.end('Internal server error');
+    });
     
-    // Prevent http-proxy from automatically piping
-    return false;
+    res.on('error', (error) => {
+      logger.error('Response stream error', { error: error.message });
+      proxyRes.destroy();
+    });
+    
+    // Pipe proxyRes through transform to res, then resume proxyRes
+    proxyRes.pipe(transform).pipe(res);
+    proxyRes.resume();
   }
 });
 
