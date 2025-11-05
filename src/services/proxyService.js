@@ -1,6 +1,7 @@
 import httpProxy from 'http-proxy';
 import { loadConfig } from '../config/index.js';
 import { logger } from '../utils/logger.js';
+import { userHasGroup } from './ldapService.js';
 
 const proxy = httpProxy.createProxyServer({
   changeOrigin: true,
@@ -38,13 +39,8 @@ proxy.on('proxyReq', (proxyReq, req, res) => {
   });
 });
 
-proxy.on('proxyRes', (proxyRes, req, res) => {
-  logger.debug('Proxy response received', {
-    statusCode: proxyRes.statusCode,
-    statusMessage: proxyRes.statusMessage,
-    contentType: proxyRes.headers['content-type']
-  });
-});
+// Store original write function to intercept HTML responses
+const originalWrite = httpProxy.Server.prototype.constructor;
 
 export function proxyRequest(req, res, next, target) {
   if (!target) {

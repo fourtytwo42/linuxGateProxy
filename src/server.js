@@ -317,14 +317,29 @@ async function startServer() {
   });
 
   // Only proxy through resources - no fallback to targetHost
-  // If no resources are configured, return 404
-  app.use(requireAuth, (req, res, next) => {
+  // If no resources are configured, show appropriate page based on user role
+  app.use(requireAuth, async (req, res, next) => {
     const resources = listResources();
     
     // Only proxy if resources are configured and accessible
     // All proxying must go through the resource router
     if (!resources || resources.length === 0) {
-      return res.status(404).send('No resources configured. Please add resources via the admin panel.');
+      const config = loadConfig();
+      const { userHasGroup } = await import('./services/ldapService.js');
+      const adminGroups = (config.adminPortal?.allowedGroupDns?.length
+        ? config.adminPortal.allowedGroupDns
+        : config.auth.adminGroupDns) || [];
+      
+      // Check if user is admin
+      const isAdmin = req.auth?.user && userHasGroup(req.auth.user, adminGroups);
+      
+      if (isAdmin) {
+        // Admin users see configure target page with admin overlay
+        return res.sendFile(path.join(publicDir, 'configure-target.html'));
+      } else {
+        // Regular users see coming soon page (no admin overlay)
+        return res.sendFile(path.join(publicDir, 'coming-soon.html'));
+      }
     }
     
     // If we reach here, the request didn't match any resource route
