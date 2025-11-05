@@ -21,6 +21,39 @@ param(
 
 $ErrorActionPreference = 'Stop'
 
+$script:LdapsConfigured = $false
+$script:LdapsError = $false
+$script:SchemaUpdated = $false
+
+Add-Type -AssemblyName System.DirectoryServices.Protocols
+
+function Test-LdapsListener {
+    param(
+        [string]$Server,
+        [int]$Port = 636,
+        [int]$TimeoutSeconds = 5
+    )
+
+    $connection = $null
+    try {
+        $endpoint = "$Server`:$Port"
+        $connection = [System.DirectoryServices.Protocols.LdapConnection]::new($endpoint)
+        $connection.SessionOptions.ProtocolVersion = 3
+        $connection.SessionOptions.SecureSocketLayer = $true
+        $connection.SessionOptions.VerifyServerCertificate = { param($conn, $cert) $true }
+        $connection.Timeout = [TimeSpan]::FromSeconds($TimeoutSeconds)
+        $connection.AuthType = [System.DirectoryServices.Protocols.AuthType]::Negotiate
+        $connection.Bind()
+        return $true
+    } catch {
+        return $false
+    } finally {
+        if ($connection) {
+            $connection.Dispose()
+        }
+    }
+}
+
 Write-Host "================================================================" -ForegroundColor Cyan
 Write-Host "Gate Proxy - Domain Controller Configuration" -ForegroundColor Cyan
 Write-Host "================================================================" -ForegroundColor Cyan
@@ -75,19 +108,19 @@ if (-not $SkipLDAPS) {
             ($_.Extensions | Where-Object { $_.Oid.FriendlyName -eq 'Subject Alternative Name' -or $_.Oid.Value -eq '2.5.29.17' })
         }
         
+        $dcInfo = Get-WmiObject Win32_ComputerSystem
+        $dcHostname = "$($env:COMPUTERNAME).$($dcInfo.Domain)".Trim('. ')
+        $dcHostnameShort = $env:COMPUTERNAME
+        $selectedCert = $null
+
         if ($certificates.Count -eq 0) {
-            Write-Host ""
+            Write-Host "" 
             Write-Host "No suitable certificate found. Creating self-signed certificate for LDAPS..." -ForegroundColor Yellow
             Write-Host ""
-            
+
             try {
-                # Get DC FQDN
-                $dcFqdn = $env:COMPUTERNAME + "." + (Get-WmiObject Win32_ComputerSystem).Domain
-                $dcShortName = $env:COMPUTERNAME
-                
-                # Create a self-signed certificate for the DC
                 $certParams = @{
-                    DnsName = @($dcFqdn, $dcShortName)
+                    DnsName = @($dcHostname, $dcHostnameShort)
                     CertStoreLocation = 'Cert:\LocalMachine\My'
                     KeyUsage = 'DigitalSignature', 'KeyEncipherment'
                     KeyAlgorithm = 'RSA'
@@ -95,11 +128,11 @@ if (-not $SkipLDAPS) {
                     HashAlgorithm = 'SHA256'
                     NotAfter = (Get-Date).AddYears(5)
                     Type = 'SSLServerAuthentication'
-                    FriendlyName = "LDAPS Certificate for $dcFqdn"
+                    FriendlyName = "LDAPS Certificate for $dcHostname"
                 }
-                
+
                 $selectedCert = New-SelfSignedCertificate @certParams
-                
+
                 Write-Host "Self-signed certificate created successfully:" -ForegroundColor Green
                 Write-Host "  Subject: $($selectedCert.Subject)" -ForegroundColor White
                 Write-Host "  Thumbprint: $($selectedCert.Thumbprint)" -ForegroundColor White
@@ -107,38 +140,26 @@ if (-not $SkipLDAPS) {
                 Write-Host ""
                 Write-Host "NOTE: This is a self-signed certificate. For production, use a certificate from your Enterprise CA." -ForegroundColor Yellow
                 Write-Host ""
-                
             } catch {
                 Write-Host "ERROR: Failed to create self-signed certificate: $($_.Exception.Message)" -ForegroundColor Red
                 Write-Host ""
-                Write-Host "LDAPS requires a certificate that:" -ForegroundColor Cyan
-                Write-Host "  - Is in the Local Machine Personal store" -ForegroundColor White
-                Write-Host "  - Has a private key" -ForegroundColor White
-                Write-Host "  - Contains the DC's FQDN in Subject or Subject Alternative Name" -ForegroundColor White
-                Write-Host "  - Is not expired" -ForegroundColor White
-                Write-Host ""
                 Write-Host "Please obtain a certificate manually and rerun this script." -ForegroundColor Yellow
                 Write-Host ""
-                $script:SkipLDAPS = $true
+                $script:LdapsError = $true
                 return
             }
         } else {
-            # Use the first suitable certificate or the one with the DC's hostname
-            $dcHostname = $env:COMPUTERNAME + "." + (Get-WmiObject Win32_ComputerSystem).Domain
-            $dcHostnameShort = $env:COMPUTERNAME
-            
-            $selectedCert = $null
             foreach ($cert in $certificates) {
                 $subject = $cert.Subject
                 $san = $cert.Extensions | Where-Object { $_.Oid.FriendlyName -eq 'Subject Alternative Name' -or $_.Oid.Value -eq '2.5.29.17' }
-                
-                if ($subject -match $dcHostname -or $subject -match $dcHostnameShort -or 
-                    ($san -and ($san.Format(0) -match $dcHostname -or $san.Format(0) -match $dcHostnameShort))) {
+
+                if ($subject -match [System.Text.RegularExpressions.Regex]::Escape($dcHostname) -or $subject -match [System.Text.RegularExpressions.Regex]::Escape($dcHostnameShort) -or 
+                    ($san -and ($san.Format(0) -match [System.Text.RegularExpressions.Regex]::Escape($dcHostname) -or $san.Format(0) -match [System.Text.RegularExpressions.Regex]::Escape($dcHostnameShort)))) {
                     $selectedCert = $cert
                     break
                 }
             }
-            
+
             if (-not $selectedCert) {
                 $selectedCert = $certificates[0]
                 Write-Host "Using certificate: $($selectedCert.Subject) (Thumbprint: $($selectedCert.Thumbprint))" -ForegroundColor Yellow
@@ -146,60 +167,68 @@ if (-not $SkipLDAPS) {
             } else {
                 Write-Host "Found suitable certificate: $($selectedCert.Subject)" -ForegroundColor Green
             }
-            
-            # Bind certificate to LDAP service
-            Write-Host ""
-            Write-Host "Binding certificate to LDAP service on port 636..." -ForegroundColor Yellow
-            
-            # Get the certificate hash
-            $certHash = $selectedCert.Thumbprint
-            
-            # Use netsh to bind the certificate (Windows Server 2012 R2 and later)
-            try {
-                $result = netsh http show sslcert ipport=0.0.0.0:636 2>&1
-                if ($LASTEXITCODE -eq 0) {
-                    Write-Host "LDAPS binding already exists. Updating..." -ForegroundColor Yellow
-                    netsh http delete sslcert ipport=0.0.0.0:636 2>&1 | Out-Null
-                }
-                
-                netsh http add sslcert ipport=0.0.0.0:636 certhash=$certHash appid="{4dc3e181-e14b-4a21-b022-59fc669b0914}" 2>&1 | Out-Null
-                
-                if ($LASTEXITCODE -eq 0) {
-                    Write-Host "LDAPS certificate bound successfully!" -ForegroundColor Green
-                } else {
-                    throw "netsh command failed with exit code $LASTEXITCODE"
-                }
-            } catch {
-                Write-Host "Failed to bind certificate using netsh: $($_.Exception.Message)" -ForegroundColor Red
-                Write-Host ""
-                Write-Host "Alternative method: Use Certificate Manager (certlm.msc)" -ForegroundColor Yellow
-                Write-Host "  1. Open certlm.msc" -ForegroundColor White
-                Write-Host "  2. Navigate to: Personal > Certificates" -ForegroundColor White
-                Write-Host "  3. Find certificate with thumbprint: $certHash" -ForegroundColor White
-                Write-Host "  4. Right-click > All Tasks > Manage Private Keys" -ForegroundColor White
-                Write-Host "  5. Grant 'Read' permission to 'NT Service\NTDS' account" -ForegroundColor White
-                Write-Host "  6. Restart the Active Directory Domain Services service" -ForegroundColor White
-                Write-Host ""
-                throw
+        }
+
+        if (-not $selectedCert) {
+            Write-Host "ERROR: Unable to locate or create a certificate for LDAPS." -ForegroundColor Red
+            Write-Host "Skipping LDAPS configuration." -ForegroundColor Yellow
+            $script:LdapsError = $true
+            return
+        }
+
+        Write-Host ""
+        Write-Host "Preparing LDAPS certificate for use..." -ForegroundColor Yellow
+
+        # Remove any HTTP SSL binding that might block port 636
+        try {
+            $bindingResult = netsh http show sslcert ipport=0.0.0.0:636 2>&1
+            if ($LASTEXITCODE -eq 0) {
+                Write-Host "Removing HTTP SSL binding on port 636 to free it for LDAPS..." -ForegroundColor Yellow
+                netsh http delete sslcert ipport=0.0.0.0:636 2>&1 | Out-Null
             }
-            
-            # Restart AD DS service to apply changes
-            Write-Host ""
-            Write-Host "Restarting Active Directory Domain Services to apply LDAPS configuration..." -ForegroundColor Yellow
-            Restart-Service -Name NTDS -Force -ErrorAction Stop
-            Write-Host "AD DS service restarted successfully." -ForegroundColor Green
-            
-            # Verify LDAPS is listening
-            Write-Host ""
-            Write-Host "Verifying LDAPS is listening on port 636..." -ForegroundColor Yellow
-            Start-Sleep -Seconds 3
-            $listening = netstat -an | Select-String -Pattern ":636" | Select-String -Pattern "LISTENING"
-            if ($listening) {
-                Write-Host "LDAPS is now listening on port 636!" -ForegroundColor Green
-            } else {
-                Write-Host "WARNING: LDAPS may not be listening. Check firewall rules and AD DS service status." -ForegroundColor Yellow
+        } catch {
+            # Ignore errors from netsh
+        }
+
+        # Install self-signed certificate into Trusted Root if necessary
+        if ($selectedCert.Subject -eq $selectedCert.Issuer) {
+            try {
+                $rootStore = New-Object System.Security.Cryptography.X509Certificates.X509Store('Root','LocalMachine')
+                $rootStore.Open([System.Security.Cryptography.X509Certificates.OpenFlags]::ReadWrite)
+                if (-not ($rootStore.Certificates | Where-Object { $_.Thumbprint -eq $selectedCert.Thumbprint })) {
+                    $rootStore.Add($selectedCert)
+                    Write-Host "Installed self-signed certificate into Trusted Root Certification Authorities." -ForegroundColor Green
+                }
+                $rootStore.Close()
+            } catch {
+                Write-Host "WARNING: Could not add certificate to Trusted Root store ($($_.Exception.Message))." -ForegroundColor Yellow
             }
         }
+
+        # Give LSASS a moment to notice the certificate
+        Start-Sleep -Seconds 3
+
+        $maxAttempts = 6
+        $ldapsReady = $false
+        for ($attempt = 1; $attempt -le $maxAttempts; $attempt++) {
+            if (Test-LdapsListener -Server $dcHostname -Port 636 -TimeoutSeconds 5) {
+                Write-Host "LDAPS listener verified on port 636 (attempt $attempt)." -ForegroundColor Green
+                $ldapsReady = $true
+                break
+            } else {
+                Write-Host "LDAPS not ready yet (attempt $attempt/$maxAttempts). Waiting 5 seconds..." -ForegroundColor Yellow
+                Start-Sleep -Seconds 5
+            }
+        }
+
+        if ($ldapsReady) {
+            $script:LdapsConfigured = $true
+        } else {
+            Write-Host "WARNING: Unable to verify LDAPS listener. A domain controller reboot may be required." -ForegroundColor Yellow
+            Write-Host "Gate Proxy will fall back to LDAP until LDAPS is available." -ForegroundColor Yellow
+            $script:LdapsError = $true
+        }
+
     } catch {
         Write-Host ""
         Write-Host "ERROR: LDAPS configuration failed: $($_.Exception.Message)" -ForegroundColor Red
@@ -283,6 +312,8 @@ if (-not $SkipSchema) {
             Write-Host ""
             Write-Host "Schema update script exited with error code: $LASTEXITCODE" -ForegroundColor Red
             exit $LASTEXITCODE
+        } else {
+            $script:SchemaUpdated = $true
         }
     } else {
         Write-Host "ERROR: Schema update script not found: $schemaScript" -ForegroundColor Red
@@ -297,13 +328,34 @@ Write-Host "Configuration Complete!" -ForegroundColor Green
 Write-Host "================================================================" -ForegroundColor Cyan
 Write-Host ""
 Write-Host "Your domain controller is now configured for GateProxy:" -ForegroundColor Green
-if (-not $SkipLDAPS) {
+if ($script:LdapsConfigured) {
     Write-Host "  [X] LDAPS on port 636 configured" -ForegroundColor Green
+} elseif ($SkipLDAPS) {
+    Write-Host "  [ ] LDAPS on port 636 configured (skipped)" -ForegroundColor Yellow
+} elseif ($script:LdapsError) {
+    Write-Host "  [!] LDAPS on port 636 configured (error - see warnings above)" -ForegroundColor Red
+} else {
+    Write-Host "  [ ] LDAPS on port 636 configured" -ForegroundColor Yellow
 }
-if (-not $SkipSchema) {
+if ($script:SchemaUpdated) {
     Write-Host "  [X] Active Directory schema updated" -ForegroundColor Green
+} elseif ($SkipSchema) {
+    Write-Host "  [ ] Active Directory schema updated (skipped)" -ForegroundColor Yellow
+} else {
+    Write-Host "  [ ] Active Directory schema updated" -ForegroundColor Yellow
 }
 Write-Host ""
-Write-Host "You can now test the LDAP connection from GateProxy." -ForegroundColor Cyan
+if ($script:LdapsConfigured -and $script:SchemaUpdated) {
+    Write-Host "You can now test the LDAP connection from GateProxy." -ForegroundColor Cyan
+} elseif ($SkipLDAPS) {
+    Write-Host "LDAPS configuration was skipped. Gate Proxy will attempt LDAP until you rerun this script with LDAPS enabled." -ForegroundColor Yellow
+} elseif ($script:LdapsError) {
+    Write-Host "LDAPS is not yet available. Reboot the domain controller or install a CA-issued certificate, then rerun the script." -ForegroundColor Yellow
+} elseif (-not $script:SchemaUpdated) {
+    Write-Host "Schema updates were skipped. Run the script again with schema enabled before testing GateProxy." -ForegroundColor Yellow
+} else {
+    Write-Host "Partial configuration completed. Review the warnings above before testing GateProxy." -ForegroundColor Yellow
+}
 Write-Host ""
+
 
