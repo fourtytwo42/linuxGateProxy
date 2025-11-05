@@ -2,12 +2,17 @@ import { execSync } from 'child_process';
 import fs from 'fs';
 import path from 'path';
 import os from 'os';
+import net from 'net';
+import dns from 'dns';
+import { promisify } from 'util';
 import { logger } from '../utils/logger.js';
-import { loadConfig, getSecret } from '../config/index.js';
+import { loadConfig, getSecret, saveConfigSection } from '../config/index.js';
 import { ensureDirSync } from '../utils/fs.js';
 import crypto from 'crypto';
 import kerberos from 'kerberos';
 import { withServiceClient } from './ldapService.js';
+
+const dnsReverse = promisify(dns.reverse);
 
 /**
  * Certificate Management Service
@@ -57,135 +62,689 @@ export function getInternalHostname() {
 }
 
 /**
+ * Test if an IP address is a CA server by checking for /certsrv/ endpoint
+ * Returns hostname if it's a CA server, null otherwise
+ */
+async function testCAServer(ip, port = 80) {
+  try {
+    const http = await import('http');
+    return new Promise((resolve) => {
+      let responseData = '';
+      
+      const req = http.request({
+        hostname: ip,
+        port: port,
+        path: '/certsrv/',
+        method: 'GET',
+        timeout: 3000
+      }, (res) => {
+        // Only accept 200-399 status codes (not 4xx/5xx errors)
+        if (res.statusCode < 200 || res.statusCode >= 400) {
+          resolve(null);
+          return;
+        }
+        
+        // Collect response data to verify it's actually a CA server
+        res.on('data', (chunk) => {
+          responseData += chunk.toString();
+          // Don't collect too much data
+          if (responseData.length > 10000) {
+            res.destroy();
+          }
+        });
+        
+        res.on('end', () => {
+          // Verify response contains CA-related content
+          // AD CS typically includes keywords like "certificate", "enroll", "certsrv", etc.
+          const isCAContent = responseData.toLowerCase().includes('certificate') ||
+                             responseData.toLowerCase().includes('enroll') ||
+                             responseData.toLowerCase().includes('certsrv') ||
+                             responseData.toLowerCase().includes('certification authority') ||
+                             res.headers['location']?.toLowerCase().includes('certsrv');
+          
+          if (isCAContent) {
+            // Try reverse DNS lookup to get actual hostname
+            dnsReverse(ip).then((hostnames) => {
+              const hostname = hostnames && hostnames.length > 0 ? hostnames[0] : ip;
+              resolve({ ip, port, hostname });
+            }).catch(() => {
+              // If reverse lookup fails, use IP
+              resolve({ ip, port, hostname: ip });
+            });
+          } else {
+            // Not a CA server - response doesn't contain CA-related content
+            resolve(null);
+          }
+        });
+        
+        res.on('error', () => {
+          resolve(null);
+        });
+      });
+      
+      req.on('error', () => resolve(null));
+      req.on('timeout', () => {
+        req.destroy();
+        resolve(null);
+      });
+      
+      req.end();
+    });
+  } catch (error) {
+    return null;
+  }
+}
+
+/**
+ * Test connectivity to a CA server by hostname
+ * Returns true if the server responds to HTTP requests
+ */
+async function testCAServerConnectivity(caServer) {
+  try {
+    const http = await import('http');
+    return new Promise((resolve) => {
+      const req = http.request({
+        hostname: caServer,
+        port: 80,
+        path: '/certsrv/',
+        method: 'GET',
+        timeout: 5000
+      }, (res) => {
+        // Any response means server is reachable
+        resolve(res.statusCode >= 200 && res.statusCode < 500);
+      });
+      
+      req.on('error', () => resolve(false));
+      req.on('timeout', () => {
+        req.destroy();
+        resolve(false);
+      });
+      
+      req.end();
+    });
+  } catch (error) {
+    logger.debug('CA server connectivity test failed', { caServer, error: error.message });
+    return false;
+  }
+}
+
+/**
+ * Scan subnet for CA servers (ports 80 and 443)
+ * Similar to LDAP/DNS discovery, but checks for /certsrv/ endpoint
+ */
+async function scanSubnetForCAServers() {
+  const discoveredServers = [];
+  
+  try {
+    // Get local network interfaces
+    const interfaces = os.networkInterfaces();
+    const localSubnets = [];
+    
+    for (const [name, addresses] of Object.entries(interfaces)) {
+      if (!addresses) continue;
+      for (const addr of addresses) {
+        if (addr.internal || addr.family !== 'IPv4') continue;
+        const ipParts = addr.address.split('.').map(Number);
+        const subnet = `${ipParts[0]}.${ipParts[1]}.${ipParts[2]}.0`;
+        if (!localSubnets.includes(subnet)) {
+          localSubnets.push(subnet);
+        }
+      }
+    }
+    
+    if (localSubnets.length === 0) {
+      logger.debug('No local subnets found for CA server scanning');
+      return discoveredServers;
+    }
+    
+    logger.info('Scanning local subnets for CA servers', { subnets: localSubnets, totalIPs: localSubnets.length * 9 });
+    
+    let testedCount = 0;
+    // Scan subnet for CA servers (ports 80 and 443)
+    for (const subnet of localSubnets) {
+      const subnetParts = subnet.split('.');
+      const scanRange = [1, 2, 10, 20, 50, 100, 150, 200, 254];
+      
+      for (const lastOctet of scanRange) {
+        testedCount++;
+        if (testedCount % 5 === 0) {
+          logger.debug('CA server scan progress', { tested: testedCount, subnet });
+        }
+        const testIp = `${subnetParts[0]}.${subnetParts[1]}.${subnetParts[2]}.${lastOctet}`;
+        
+        // Skip our own IP
+        let isLocal = false;
+        for (const addrs of Object.values(interfaces)) {
+          if (addrs && addrs.some(addr => addr.family === 'IPv4' && addr.address === testIp)) {
+            isLocal = true;
+            break;
+          }
+        }
+        if (isLocal) continue;
+        
+        // Test port 80 (HTTP)
+        try {
+          const caInfo = await testCAServer(testIp, 80);
+          if (caInfo && caInfo.hostname !== testIp) {
+            // Only add if we got a proper hostname (not just IP)
+            logger.info('Discovered CA server via port scan', { ip: caInfo.ip, port: caInfo.port, hostname: caInfo.hostname });
+            discoveredServers.push(caInfo.hostname);
+          } else if (caInfo) {
+            // Got IP only, but it's a valid CA server
+            logger.info('Discovered CA server via port scan (IP only)', { ip: caInfo.ip, port: caInfo.port });
+            discoveredServers.push(caInfo.ip);
+          }
+        } catch (e) {
+          // Continue
+        }
+        
+        // Test port 443 (HTTPS) - some CA servers use HTTPS
+        try {
+          const https = await import('https');
+          let responseData = '';
+          
+          const caInfo = await new Promise((resolve) => {
+            const req = https.request({
+              hostname: testIp,
+              port: 443,
+              path: '/certsrv/',
+              method: 'GET',
+              rejectUnauthorized: false, // Allow self-signed certs
+              timeout: 3000
+            }, (res) => {
+              if (res.statusCode < 200 || res.statusCode >= 400) {
+                resolve(null);
+                return;
+              }
+              
+              // Collect response data to verify it's actually a CA server
+              res.on('data', (chunk) => {
+                responseData += chunk.toString();
+                if (responseData.length > 10000) {
+                  res.destroy();
+                }
+              });
+              
+              res.on('end', () => {
+                // Verify response contains CA-related content
+                const isCAContent = responseData.toLowerCase().includes('certificate') ||
+                                   responseData.toLowerCase().includes('enroll') ||
+                                   responseData.toLowerCase().includes('certsrv') ||
+                                   responseData.toLowerCase().includes('certification authority') ||
+                                   res.headers['location']?.toLowerCase().includes('certsrv');
+                
+                if (isCAContent) {
+                  // Try reverse DNS lookup
+                  dnsReverse(testIp).then((hostnames) => {
+                    const hostname = hostnames && hostnames.length > 0 ? hostnames[0] : testIp;
+                    resolve({ ip: testIp, port: 443, hostname });
+                  }).catch(() => {
+                    resolve({ ip: testIp, port: 443, hostname: testIp });
+                  });
+                } else {
+                  // Not a CA server - response doesn't contain CA-related content
+                  resolve(null);
+                }
+              });
+              
+              res.on('error', () => resolve(null));
+            });
+            
+            req.on('error', () => resolve(null));
+            req.on('timeout', () => {
+              req.destroy();
+              resolve(null);
+            });
+            
+            req.end();
+          });
+          
+          if (caInfo) {
+            if (caInfo.hostname !== testIp && !discoveredServers.includes(caInfo.hostname)) {
+              logger.info('Discovered CA server via HTTPS port scan', { ip: caInfo.ip, port: caInfo.port, hostname: caInfo.hostname });
+              discoveredServers.push(caInfo.hostname);
+            } else if (caInfo.hostname === testIp && !discoveredServers.includes(caInfo.ip)) {
+              logger.info('Discovered CA server via HTTPS port scan (IP only)', { ip: caInfo.ip, port: caInfo.port });
+              discoveredServers.push(caInfo.ip);
+            }
+          }
+        } catch (e) {
+          // Continue
+        }
+      }
+    }
+    
+    logger.info('CA server port scan completed', { count: discoveredServers.length, servers: discoveredServers });
+    return [...new Set(discoveredServers)]; // Remove duplicates
+  } catch (error) {
+    logger.warn('CA server port scan failed', { error: error.message });
+    return discoveredServers;
+  }
+}
+
+/**
+ * Discover potential CA servers from configured sources and port scanning
+ * Returns array of potential CA server names/IPs
+ */
+async function discoverPotentialCAServers() {
+  const potentialServers = [];
+    const config = loadConfig();
+    
+  // 1. Check configured CA server
+    if (config.certificate?.caServer) {
+    potentialServers.push(config.certificate.caServer);
+  }
+  
+  // 2. Try using LDAP hostname (CA might be on DC)
+  if (config.auth?.ldapHost) {
+    const ldapHost = config.auth.ldapHost.replace(/^ldaps?:\/\//, '').split(':')[0];
+    if (!potentialServers.includes(ldapHost)) {
+      potentialServers.push(ldapHost);
+    }
+  }
+  
+  // 3. Try to discover via LDAP (AD CS publishes CA info)
+  try {
+    const domain = inferDomain(config);
+    logger.info('Querying LDAP for CA server information');
+    const ldapCAInfo = await withServiceClient(async (ldapClient, cfg) => {
+        const baseParts = cfg.auth.baseDn.split(',').filter(p => p.toLowerCase().startsWith('dc='));
+        const configBase = ['CN=Configuration', ...baseParts].join(',');
+        const pkiBase = `CN=Public Key Services,CN=Services,${configBase}`;
+        const searchBase = `CN=Enrollment Services,${pkiBase}`;
+        
+        try {
+        // Query for enrollment services - get all relevant attributes
+        // Try both the Enrollment Services container and direct search
+        let result = await ldapClient.search(searchBase, {
+            scope: 'sub',
+            filter: '(objectClass=pKIEnrollmentService)',
+          attributes: ['dnsHostName', 'dNSHostName', 'serverDNSName', 'cn', 'name', 'displayName', 'distinguishedName']
+        });
+        
+        // If no results, try searching in the parent container
+        if (!result.searchEntries || result.searchEntries.length === 0) {
+          const parentBase = `CN=Public Key Services,CN=Services,${configBase}`;
+          logger.debug('Trying alternative search base', { parentBase });
+          result = await ldapClient.search(parentBase, {
+            scope: 'sub',
+            filter: '(objectClass=pKIEnrollmentService)',
+            attributes: ['dnsHostName', 'dNSHostName', 'serverDNSName', 'cn', 'name', 'displayName', 'distinguishedName']
+          });
+        }
+        
+        logger.debug('LDAP CA query result', { 
+          entries: result.searchEntries?.length || 0,
+          searchBase,
+          firstEntry: result.searchEntries?.[0] ? Object.keys(result.searchEntries[0]) : null
+          });
+          
+          if (result.searchEntries && result.searchEntries.length > 0) {
+          for (const ca of result.searchEntries) {
+            let caServer = null;
+            // Try multiple attribute names (case variations)
+            const dnsHostName = ca.dnsHostName || ca.dNSHostName || ca.dnshostname;
+            const serverDNSName = ca.serverDNSName || ca.serverdnsname;
+            const name = ca.name || ca.Name;
+            const cn = ca.cn || ca.CN;
+            
+            logger.debug('Processing CA entry', { 
+              dnsHostName, 
+              serverDNSName, 
+              name, 
+              cn,
+              dn: ca.distinguishedName,
+              allAttributes: Object.keys(ca)
+            });
+            
+            // Priority: dnsHostName > serverDNSName > name > cn
+            if (dnsHostName) {
+              caServer = Array.isArray(dnsHostName) ? dnsHostName[0] : dnsHostName;
+            } else if (serverDNSName) {
+              caServer = Array.isArray(serverDNSName) ? serverDNSName[0] : serverDNSName;
+            } else if (name && domain) {
+              caServer = `${name}.${domain.toLowerCase()}`;
+            } else if (cn && domain) {
+              caServer = `${cn}.${domain.toLowerCase()}`;
+            } else if (name) {
+              caServer = name;
+            } else if (cn) {
+              caServer = cn;
+            }
+            
+            if (caServer) {
+              // Clean up the server name (remove any LDAP formatting)
+              caServer = caServer.toString().trim();
+              if (caServer && !potentialServers.includes(caServer)) {
+                logger.info('Found CA server via LDAP', { caServer, source: 'LDAP query', dn: ca.distinguishedName });
+                potentialServers.push(caServer);
+              }
+            }
+          }
+        } else {
+          logger.warn('LDAP CA query returned no results', { searchBase });
+          
+          // Method 3: Query Certification Authorities container (alternative location)
+          logger.debug('Trying Certification Authorities container');
+          const caBase = `CN=Certification Authorities,${pkiBase}`;
+          try {
+            const caResult = await ldapClient.search(caBase, {
+              scope: 'sub',
+              filter: '(objectClass=pKICertificateAuthority)',
+              attributes: ['dnsHostName', 'dNSHostName', 'cn', 'name', 'distinguishedName']
+            });
+            
+            if (caResult.searchEntries && caResult.searchEntries.length > 0) {
+              logger.debug('Found CA entries in Certification Authorities container', { count: caResult.searchEntries.length });
+              // Process these entries (same logic as above)
+              for (const ca of caResult.searchEntries) {
+                const dnsHostName = ca.dnsHostName || ca.dNSHostName;
+                const cn = ca.cn || ca.CN;
+                const name = ca.name || ca.Name;
+                
+                let caServer = null;
+                if (dnsHostName) {
+                  caServer = Array.isArray(dnsHostName) ? dnsHostName[0] : dnsHostName;
+                } else if (name && domain) {
+                  caServer = `${name}.${domain.toLowerCase()}`;
+                } else if (cn && domain) {
+                  caServer = `${cn}.${domain.toLowerCase()}`;
+                }
+                
+                if (caServer && !potentialServers.includes(caServer)) {
+                  logger.info('Found CA server via Certification Authorities container', { caServer, dn: ca.distinguishedName });
+                  potentialServers.push(caServer);
+                }
+              }
+            }
+          } catch (caError) {
+            logger.debug('Certification Authorities query failed', { error: caError.message });
+          }
+          
+          // Method 4: Check Cert Publishers group members (servers with CA role)
+          logger.debug('Checking Cert Publishers group members');
+          try {
+            const certPublishersDN = `CN=Cert Publishers,CN=Users,${cfg.auth.baseDn}`;
+            const groupResult = await ldapClient.search(certPublishersDN, {
+              scope: 'base',
+              filter: '(objectClass=group)',
+              attributes: ['member']
+            });
+            
+            if (groupResult.searchEntries && groupResult.searchEntries.length > 0) {
+              const members = groupResult.searchEntries[0].member || [];
+              logger.debug('Found Cert Publishers group members', { count: members.length });
+              
+              // Query each member to get their dNSHostName
+              for (const memberDn of members) {
+                try {
+                  const memberResult = await ldapClient.search(memberDn, {
+                    scope: 'base',
+                    filter: '(objectClass=computer)',
+                    attributes: ['dNSHostName', 'dnsHostName', 'name', 'cn']
+                  });
+                  
+                  if (memberResult.searchEntries && memberResult.searchEntries.length > 0) {
+                    const member = memberResult.searchEntries[0];
+                    const hostname = member.dNSHostName || member.dnsHostName || member.name || member.cn;
+                    if (hostname) {
+                      const hostnameStr = Array.isArray(hostname) ? hostname[0] : hostname;
+                      if (hostnameStr && !potentialServers.includes(hostnameStr)) {
+                        logger.info('Found CA server via Cert Publishers group', { caServer: hostnameStr, memberDn });
+                        potentialServers.push(hostnameStr);
+                      }
+                    }
+                  }
+                } catch (memberError) {
+                  logger.debug('Failed to query Cert Publishers member', { memberDn, error: memberError.message });
+                }
+              }
+            }
+          } catch (groupError) {
+            logger.debug('Failed to query Cert Publishers group', { error: groupError.message });
+          }
+          
+          // Method 5: Try a broader search for any PKI-related objects
+          logger.debug('Trying broader PKI search');
+          const broadResult = await ldapClient.search(`CN=Public Key Services,CN=Services,${configBase}`, {
+            scope: 'sub',
+            filter: '(objectClass=*)',
+            attributes: ['dnsHostName', 'dNSHostName', 'serverDNSName', 'cn', 'name', 'distinguishedName', 'objectClass']
+          });
+          logger.info('Broad PKI search result', { entries: broadResult.searchEntries?.length || 0 });
+          
+          // Process the broad search results - look for any objects with dNSHostName
+          if (broadResult.searchEntries && broadResult.searchEntries.length > 0) {
+            logger.info('Processing broad PKI search entries', { count: broadResult.searchEntries.length });
+            for (const entry of broadResult.searchEntries) {
+              const dnsHostName = entry.dnsHostName || entry.dNSHostName;
+              const serverDNSName = entry.serverDNSName || entry.serverdnsname;
+              const cn = entry.cn || entry.CN;
+              const name = entry.name || entry.Name;
+              const objectClass = entry.objectClass || [];
+              const objectClasses = Array.isArray(objectClass) ? objectClass : [objectClass];
+              
+              logger.info('Broad PKI entry details', { 
+                dn: entry.distinguishedName,
+                objectClass: objectClasses,
+                hasDnsHostName: !!dnsHostName,
+                hasServerDNSName: !!serverDNSName,
+                hasCn: !!cn,
+                hasName: !!name,
+                cn: cn,
+                name: name,
+                dnsHostName: dnsHostName,
+                serverDNSName: serverDNSName,
+                allAttributeKeys: Object.keys(entry)
+              });
+              
+              // Try to extract hostname from any available attribute
+              let hostnameStr = null;
+              
+              if (dnsHostName) {
+                hostnameStr = Array.isArray(dnsHostName) ? dnsHostName[0] : dnsHostName;
+              } else if (serverDNSName) {
+                hostnameStr = Array.isArray(serverDNSName) ? serverDNSName[0] : serverDNSName;
+              } else if (cn && domain) {
+                const cnStr = Array.isArray(cn) ? cn[0] : cn;
+                // Only construct hostname if CN doesn't already look like a hostname
+                if (cnStr.includes('.')) {
+                  hostnameStr = cnStr;
+                } else {
+                  hostnameStr = `${cnStr}.${domain.toLowerCase()}`;
+                }
+              } else if (name && domain) {
+                const nameStr = Array.isArray(name) ? name[0] : name;
+                if (nameStr.includes('.')) {
+                  hostnameStr = nameStr;
+                } else {
+                  hostnameStr = `${nameStr}.${domain.toLowerCase()}`;
+                }
+              }
+              
+              if (hostnameStr) {
+                hostnameStr = hostnameStr.toString().trim();
+                if (hostnameStr && !potentialServers.includes(hostnameStr)) {
+                  logger.info('Found potential CA server via broad PKI search', { 
+                    caServer: hostnameStr, 
+                    dn: entry.distinguishedName, 
+                    objectClass: objectClasses,
+                    source: dnsHostName ? 'dnsHostName' : serverDNSName ? 'serverDNSName' : 'constructed'
+                  });
+                  potentialServers.push(hostnameStr);
+                } else if (hostnameStr) {
+                  logger.debug('CA server already in potential servers list', { caServer: hostnameStr });
+                }
+              } else {
+                logger.debug('No hostname extracted from broad PKI entry', { 
+                  dn: entry.distinguishedName,
+                  hasAttributes: {
+                    dnsHostName: !!dnsHostName,
+                    serverDNSName: !!serverDNSName,
+                    cn: !!cn,
+                    name: !!name,
+                    domain: !!domain
+                  }
+                });
+              }
+            }
+          }
+        }
+      } catch (error) {
+        logger.warn('LDAP CA discovery failed', { error: error.message, stack: error.stack });
+      }
+      return null;
+    });
+  } catch (error) {
+    logger.warn('LDAP CA discovery error', { error: error.message });
+  }
+  
+  // 3b. Try DNS SRV record for certificate enrollment services
+  try {
+    const domain = inferDomain(config);
+    if (domain) {
+      logger.info('Querying DNS SRV records for CA server', { domain });
+      const dns = await import('dns');
+      const { promisify } = await import('util');
+      const resolveSrv = promisify(dns.resolveSrv);
+      
+      try {
+        // Query for _certificates._tcp.domain (certificate enrollment service)
+        const srvRecords = await resolveSrv(`_certificates._tcp.${domain}`);
+        if (srvRecords && srvRecords.length > 0) {
+          for (const record of srvRecords) {
+            const caServer = record.name;
+            if (caServer && !potentialServers.includes(caServer)) {
+              logger.info('Found CA server via DNS SRV record', { caServer, priority: record.priority, weight: record.weight });
+              potentialServers.push(caServer);
+            }
+          }
+        }
+      } catch (srvError) {
+        // SRV records might not exist - that's okay
+        logger.debug('DNS SRV record query failed (not critical)', { error: srvError.message });
+      }
+    }
+  } catch (error) {
+    logger.debug('DNS SRV discovery error', { error: error.message });
+  }
+  
+  // Port scanning removed - using LDAP and DNS only
+  
+  // Remove duplicates
+  const uniqueServers = [...new Set(potentialServers)];
+  logger.debug('discoverPotentialCAServers completed', { count: uniqueServers.length });
+  return uniqueServers;
+}
+
+/**
  * Discover Certificate Authority server from Active Directory
  * Returns CA server name and template name, or null if not found
+ * Now tests connectivity to potential servers
  */
 export async function discoverCA() {
   try {
-    // On Linux, we can't directly query AD CS, so we'll need to:
-    // 1. Try to find CA via LDAP (AD CS publishes CA info in AD)
-    // 2. Or use the configured CA server from config
-    
     const config = loadConfig();
     
-    // Check if CA is configured manually
+    // Check if CA is configured manually - test it first
     if (config.certificate?.caServer) {
-      return {
-        caServer: config.certificate.caServer,
-        templateName: config.certificate.templateName || 'WebServer',
-        found: true
-      };
+      const isReachable = await testCAServerConnectivity(config.certificate.caServer);
+      if (isReachable) {
+        return {
+          caServer: config.certificate.caServer,
+          templateName: config.certificate.templateName || 'WebServer',
+          found: true
+        };
+      } else {
+        logger.warn('Configured CA server is not reachable', { caServer: config.certificate.caServer });
+      }
     }
     
-    // Try to discover CA via LDAP
-    // AD CS publishes CA information in CN=Enrollment Services,CN=Public Key Services,CN=Services,CN=Configuration,DC=...
+    // Discover potential CA servers
+    logger.info('Discovering potential CA servers...');
+    const potentialServers = await discoverPotentialCAServers();
+    logger.info('Discovered potential CA servers', { count: potentialServers.length, servers: potentialServers });
+    
+    if (potentialServers.length === 0) {
+      logger.warn('No potential CA servers found');
+      return { found: false };
+    }
+    
+    // Test each potential server
+    logger.info('Testing CA server connectivity', { count: potentialServers.length });
+    for (const server of potentialServers) {
+      if (server === config.certificate?.caServer) {
+        continue; // Already tested
+      }
+      
+      logger.info('Testing CA server connectivity', { caServer: server });
+      const isReachable = await testCAServerConnectivity(server);
+      
+      if (isReachable) {
+        logger.info('Found reachable CA server', { caServer: server });
+        
+        // Save discovered CA server to config
+        if (!config.certificate?.caServer) {
+          saveConfigSection('certificate', {
+            ...config.certificate,
+            caServer: server,
+            templateName: config.certificate?.templateName || 'WebServer'
+          });
+        }
+        
+        return {
+          caServer: server,
+          templateName: config.certificate?.templateName || 'WebServer',
+          found: true
+        };
+      } else {
+        logger.debug('CA server connectivity test failed', { caServer: server });
+      }
+    }
+    
+    // Fallback to original LDAP discovery (for backward compatibility)
     try {
       const caInfo = await withServiceClient(async (ldapClient, cfg) => {
-        // Convert baseDn to Configuration naming context
-        // baseDn is like DC=example,DC=com
-        // Configuration is CN=Configuration,DC=example,DC=com
         const baseParts = cfg.auth.baseDn.split(',').filter(p => p.toLowerCase().startsWith('dc='));
         const configBase = ['CN=Configuration', ...baseParts].join(',');
         const searchBase = `CN=Enrollment Services,CN=Public Key Services,CN=Services,${configBase}`;
-        
-        // Get domain for FQDN construction
         const domain = inferDomain(config) || baseParts.map(p => p.split('=')[1]).join('.');
         
         try {
           const result = await ldapClient.search(searchBase, {
             scope: 'sub',
             filter: '(objectClass=pKIEnrollmentService)',
-            attributes: ['*'] // Request all attributes to see what's available
+            attributes: ['*']
           });
           
           if (result.searchEntries && result.searchEntries.length > 0) {
             const ca = result.searchEntries[0];
-            
-            // Log what we received for debugging
-            logger.debug('CA enrollment service found', { 
-              cn: ca.cn, 
-              dnsHostName: ca.dnsHostName || ca.dNSHostName,
-              serverDNSName: ca.serverDNSName,
-              dn: ca.distinguishedName,
-              allAttributes: Object.keys(ca)
-            });
-            
-            // Get DNS hostname with case-insensitive access (AD uses dNSHostName with mixed case)
-            // Also check all possible attribute name variations
-            let dnsHostName = null;
-            let serverDNSName = null;
-            
-            // Check common attribute name variations (case-insensitive)
-            for (const key of Object.keys(ca)) {
-              const lowerKey = key.toLowerCase();
-              let value = ca[key];
-              
-              // Handle array values (LDAP attributes can be arrays)
-              if (Array.isArray(value) && value.length > 0) {
-                value = value[0];
-              }
-              
-              if ((lowerKey === 'dnshostname' || lowerKey === 'dns_host_name') && value) {
-                dnsHostName = value;
-                logger.debug('Found dNSHostName attribute', { key, value: dnsHostName });
-              } else if ((lowerKey === 'serverdnsname' || lowerKey === 'server_dns_name') && value) {
-                serverDNSName = value;
-                logger.debug('Found serverDNSName attribute', { key, value: serverDNSName });
-              }
-            }
-            
-            // Also try direct access with common case variations
-            if (!dnsHostName) {
-              dnsHostName = ca.dnsHostName || ca.dNSHostName || ca['dNSHostName'] || ca['DNSHostName'];
-            }
-            if (!serverDNSName) {
-              serverDNSName = ca.serverDNSName || ca.serverDnsName || ca['serverDNSName'];
-            }
-            
-            // Log what we found
-            logger.debug('DNS hostname lookup result', { dnsHostName, serverDNSName, caKeys: Object.keys(ca) });
-            
-            // Priority: dnsHostName > serverDNSName > construct FQDN from cn + domain
             let caServer = null;
+            
+            const dnsHostName = ca.dnsHostName || ca.dNSHostName || ca['dNSHostName'] || ca['DNSHostName'];
+            const serverDNSName = ca.serverDNSName || ca.serverDnsName || ca['serverDNSName'];
             
             if (dnsHostName) {
               caServer = Array.isArray(dnsHostName) ? dnsHostName[0] : dnsHostName;
-              logger.debug('Using dNSHostName from enrollment service', { caServer });
             } else if (serverDNSName) {
               caServer = Array.isArray(serverDNSName) ? serverDNSName[0] : serverDNSName;
-              logger.debug('Using serverDNSName from enrollment service', { caServer });
             } else if (ca.cn && domain) {
-              // Try to construct FQDN from CA name + domain
-              // If cn is like "Silverbacks-CA", try "Silverbacks-CA.domain.com"
               caServer = `${ca.cn}.${domain.toLowerCase()}`;
-              logger.debug('Constructed CA server FQDN from cn and domain', { caServer, cn: ca.cn, domain });
-            } else {
-              // Last resort: use cn as-is (might not resolve)
+            } else if (ca.cn) {
               caServer = ca.cn;
-              logger.warn('Using CA cn as server name (may not resolve)', { caServer: ca.cn });
             }
             
-            // Validate that we have a server name
-            if (!caServer) {
-              logger.warn('Could not determine CA server name from LDAP attributes', { ca });
-              // Fallback: try using LDAP hostname (CA might be on DC)
-              if (cfg.auth?.ldapHost) {
-                const ldapHost = cfg.auth.ldapHost.replace(/^ldaps?:\/\//, '').split(':')[0];
-                logger.info('Using LDAP host as CA server fallback', { caServer: ldapHost });
+            if (caServer) {
+              // Test connectivity before returning
+              const isReachable = await testCAServerConnectivity(caServer);
+              if (isReachable) {
                 return {
-                  caServer: ldapHost,
+                  caServer: caServer,
                   templateName: 'WebServer',
                   found: true
                 };
               }
-              return null;
             }
-            
-            return {
-              caServer: caServer,
-              templateName: 'WebServer', // Default template
-              found: true
-            };
           }
         } catch (error) {
           logger.debug('Could not discover CA via LDAP', { error: error.message });
@@ -928,6 +1487,106 @@ export async function requestCertificate(dnsNames = []) {
   } catch (error) {
     logger.error('Certificate request failed', { error: error.message });
     throw error;
+  }
+}
+
+/**
+ * Check if certificate is expiring soon (within days)
+ */
+function isCertificateExpiringSoon(days = 30) {
+  if (!hasValidCertificate()) {
+    return true; // No certificate means it's "expired"
+  }
+  
+  try {
+    // Use openssl to get certificate expiration date
+    const result = execSync(`openssl x509 -in "${CERT_FILE}" -noout -enddate`, { 
+      encoding: 'utf8', 
+      timeout: 5000,
+      stdio: 'pipe'
+    });
+    const dateMatch = result.match(/notAfter=(.+)/);
+    if (dateMatch) {
+      const expirationDate = new Date(dateMatch[1]);
+      const now = new Date();
+      const daysUntilExpiration = (expirationDate - now) / (1000 * 60 * 60 * 24);
+      logger.debug('Certificate expiration check', { 
+        expirationDate: expirationDate.toISOString(),
+        daysUntilExpiration: Math.round(daysUntilExpiration)
+      });
+      return daysUntilExpiration < days;
+    }
+    // If we can't parse the date, assume it's valid (don't auto-renew)
+    logger.warn('Could not parse certificate expiration date', { result });
+    return false;
+  } catch (error) {
+    logger.debug('Could not check certificate expiration via openssl', { error: error.message });
+    // If we can't check expiration (openssl not available), assume it's valid (don't auto-renew)
+    return false;
+  }
+}
+
+/**
+ * Automatic certificate management
+ * Discovers CA, checks certificate status, and requests/renews if needed
+ */
+export async function autoManageCertificate() {
+  try {
+    logger.info('Starting automatic certificate management');
+    
+    // Check if we have a valid certificate
+    const hasCert = hasValidCertificate();
+    const needsCert = !hasCert || isCertificateExpiringSoon(30);
+    
+    if (!needsCert) {
+      logger.debug('Certificate is valid and not expiring soon, skipping auto-management');
+      return { status: 'SKIPPED', reason: 'certificate valid' };
+    }
+    
+    // Discover CA server
+    logger.info('Certificate missing or expiring, discovering CA server');
+    const caInfo = await discoverCA();
+    
+    if (!caInfo || !caInfo.found) {
+      logger.info('CA server not found, skipping automatic certificate management');
+      return { status: 'SKIPPED', reason: 'CA server not found' };
+    }
+    
+    logger.info('CA server found, attempting certificate request', { 
+      caServer: caInfo.caServer,
+      templateName: caInfo.templateName 
+    });
+    
+    // Request certificate
+    try {
+      const result = await requestCertificate();
+      logger.info('Automatic certificate request successful', { 
+        certPath: result.certPath,
+        keyPath: result.keyPath 
+      });
+      return { 
+        status: 'SUCCESS', 
+        action: hasCert ? 'renewed' : 'installed',
+        certPath: result.certPath 
+      };
+    } catch (error) {
+      logger.warn('Automatic certificate request failed', { 
+        error: error.message,
+        caServer: caInfo.caServer 
+      });
+      return { 
+        status: 'FAILED', 
+        error: error.message,
+        reason: 'certificate request failed' 
+      };
+    }
+  } catch (error) {
+    logger.error('Automatic certificate management failed', { error: error.message, stack: error.stack });
+    return { 
+      status: 'FAILED', 
+      error: error.message,
+      reason: 'management error' 
+    };
   }
 }
 

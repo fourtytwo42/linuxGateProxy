@@ -200,11 +200,11 @@ router.post('/gateProxyAdmin/api/settings/auth', requireAdmin, (req, res) => {
   updates.webAuthnAttribute = FIXED_WEBAUTHN_ATTR;
   
   // Update LDAP connection settings if provided
+  if (req.body.ldapsPort !== undefined) {
+    updates.ldapsPort = Number(req.body.ldapsPort);
+  }
   if (req.body.ldapPort !== undefined) {
     updates.ldapPort = Number(req.body.ldapPort);
-  }
-  if (req.body.useLdaps !== undefined) {
-    updates.useLdaps = Boolean(req.body.useLdaps);
   }
   
   saveConfigSection('auth', updates);

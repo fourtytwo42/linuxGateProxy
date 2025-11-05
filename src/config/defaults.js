@@ -13,8 +13,9 @@ export const defaultSettings = {
   auth: {
     domain: '',
     ldapHost: '',
-    ldapPort: 636,
-    useLdaps: true,
+    ldapsPort: 636,
+    ldapPort: 389,
+    useLdaps: true, // Deprecated - system will auto-detect, but kept for backward compatibility
     baseDn: '',
     lookupUser: '',
     sessionAttribute: 'gateProxySession',

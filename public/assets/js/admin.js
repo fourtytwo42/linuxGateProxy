@@ -42,9 +42,6 @@ const adminGroupHiddenInput = document.getElementById('adminGroupDns');
 const exportSettingsButton = document.getElementById('export-settings-button');
 const importSettingsButton = document.getElementById('import-settings-button');
 const importSettingsFile = document.getElementById('import-settings-file');
-const exportCloudflaredCertButton = document.getElementById('export-cloudflared-cert-button');
-const importCloudflaredCertButton = document.getElementById('import-cloudflared-cert-button');
-const importCloudflaredCertFile = document.getElementById('import-cloudflared-cert-file');
 const requestCertificateButton = document.getElementById('request-certificate-button');
 
 let settings = null;
@@ -807,13 +804,30 @@ async function loadSettings() {
     }
     
     // Load LDAP connection settings
+    const ldapsPortInput = settingsForm.querySelector('input[name="ldapsPort"]');
     const ldapPortInput = settingsForm.querySelector('input[name="ldapPort"]');
-    const useLdapsCheckbox = document.getElementById('useLdaps');
-    if (ldapPortInput) {
-      ldapPortInput.value = settings.auth?.ldapPort || (settings.auth?.useLdaps ? 636 : 389);
+    if (ldapsPortInput) {
+      // New config: use ldapsPort if set
+      // Old config: if ldapPort is set and useLdaps=true, that was the LDAPS port
+      // Otherwise default to 636
+      if (settings.auth?.ldapsPort) {
+        ldapsPortInput.value = settings.auth.ldapsPort;
+      } else if (settings.auth?.ldapPort && settings.auth?.useLdaps !== false) {
+        // Old config: ldapPort was the LDAPS port when useLdaps=true
+        ldapsPortInput.value = settings.auth.ldapPort;
+      } else {
+        ldapsPortInput.value = 636;
+      }
     }
-    if (useLdapsCheckbox) {
-      useLdapsCheckbox.checked = settings.auth?.useLdaps !== false; // Default to true if not set
+    if (ldapPortInput) {
+      // LDAP port (non-secure) always defaults to 389
+      // Only use configured value if it's explicitly different from LDAPS port
+      const ldapsPort = settings.auth?.ldapsPort || (settings.auth?.ldapPort && settings.auth?.useLdaps !== false ? settings.auth.ldapPort : 636);
+      if (settings.auth?.ldapPort && settings.auth.ldapPort !== ldapsPort) {
+        ldapPortInput.value = settings.auth.ldapPort;
+      } else {
+        ldapPortInput.value = 389;
+      }
     }
 
     adminGroups = (settings.auth.adminGroupDns || []).map((dn) => ({ dn, name: extractNameFromDn(dn) }));
@@ -857,12 +871,14 @@ settingsForm?.addEventListener('submit', async (event) => {
     await postJson('/gateProxyAdmin/api/settings/site', payload);
     
     // Save LDAP connection settings
+    const ldapsPortInput = settingsForm.querySelector('input[name="ldapsPort"]');
     const ldapPortInput = settingsForm.querySelector('input[name="ldapPort"]');
-    const useLdapsCheckbox = document.getElementById('useLdaps');
     const authPayload = { adminGroupDns: payload.adminGroupDns };
-    if (ldapPortInput && useLdapsCheckbox) {
-      authPayload.ldapPort = Number(ldapPortInput.value) || (useLdapsCheckbox.checked ? 636 : 389);
-      authPayload.useLdaps = useLdapsCheckbox.checked;
+    if (ldapsPortInput) {
+      authPayload.ldapsPort = Number(ldapsPortInput.value) || 636;
+    }
+    if (ldapPortInput) {
+      authPayload.ldapPort = Number(ldapPortInput.value) || 389;
     }
     await postJson('/gateProxyAdmin/api/settings/auth', authPayload);
     
@@ -956,187 +972,22 @@ importSettingsFile?.addEventListener('change', async (event) => {
   }
 });
 
-// Cloudflared certificate export/import
-exportCloudflaredCertButton?.addEventListener('click', async () => {
-  try {
-    const response = await fetch('/gateProxyAdmin/api/cloudflare/cert/export');
-    if (!response.ok) {
-      const error = await response.json();
-      throw new Error(error.error || 'Failed to export certificate');
-    }
-    const blob = await response.blob();
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement('a');
-    link.href = url;
-    link.download = 'cloudflared-cert.pem';
-    link.click();
-    URL.revokeObjectURL(url);
-    showAlert('Certificate exported successfully.', 'success');
-  } catch (error) {
-    showAlert(error.message);
-  }
-});
-
-importCloudflaredCertButton?.addEventListener('click', () => {
-  importCloudflaredCertFile.click();
-});
-
-importCloudflaredCertFile?.addEventListener('change', async (event) => {
-  const file = event.target.files?.[0];
-  if (!file) return;
-  try {
-    const content = await file.text();
-    if (!confirm('Importing certificate will overwrite the current Cloudflared certificate. Continue?')) return;
-    await postJson('/gateProxyAdmin/api/cloudflare/cert/import', { cert: content });
-    showAlert('Certificate imported successfully.', 'success');
-  } catch (error) {
-    showAlert(error.message);
-  } finally {
-    importCloudflaredCertFile.value = '';
-  }
-});
-
 async function updateTunnelStatus() {
+  // Update tunnel status in settings object for dashboard indicator
+  // UI elements removed - status is shown in dashboard status cards
   try {
-    const statusEl = document.getElementById('tunnel-status');
-    const authStatusEl = document.getElementById('tunnel-auth-status');
-    const configStatusEl = document.getElementById('tunnel-config-status');
-    const runningStatusEl = document.getElementById('tunnel-running-status');
-    const repairButton = document.getElementById('repair-tunnel-button');
+    const tunnelStatus = await getJson('/gateProxyAdmin/api/cloudflare/status');
     
-    if (!statusEl) return;
-    
-    try {
-      const tunnelStatus = await getJson('/gateProxyAdmin/api/cloudflare/status');
-      
-      // Update main status
-      let statusText = '';
-      let statusColor = 'muted';
-      
-      if (!settings?.cloudflare?.isAuthenticated) {
-        statusText = 'Not authenticated';
-        statusColor = 'danger';
-      } else if (!settings?.cloudflare?.isConfigured) {
-        statusText = 'Authenticated, tunnel not configured';
-        statusColor = 'warning';
-      } else if (tunnelStatus.status === 'UP') {
-        statusText = `Active (${tunnelStatus.name || settings?.cloudflare?.tunnelName || 'Unknown'})`;
-        statusColor = 'success';
-      } else if (tunnelStatus.status === 'DOWN') {
-        statusText = `Configured but not running (${tunnelStatus.name || settings?.cloudflare?.tunnelName || 'Unknown'})`;
-        statusColor = 'warning';
-      } else if (tunnelStatus.status) {
-        statusText = `${tunnelStatus.status} (${tunnelStatus.name || settings?.cloudflare?.tunnelName || 'Unknown'})`;
-        statusColor = tunnelStatus.status === 'UP' ? 'success' : 'warning';
-      } else {
-        statusText = settings?.cloudflare?.tunnelName || 'Unknown status';
-        statusColor = 'warning';
-      }
-      
-      statusEl.textContent = statusText;
-      statusEl.style.color = `var(--${statusColor === 'success' ? 'success' : statusColor === 'danger' ? 'danger' : 'warning'})`;
-      
-      // Update detailed status
-      if (authStatusEl) {
-        authStatusEl.textContent = settings?.cloudflare?.isAuthenticated 
-          ? '✓ Authenticated with Cloudflare'
-          : '✗ Not authenticated';
-        authStatusEl.style.color = settings?.cloudflare?.isAuthenticated ? 'var(--success)' : 'var(--danger)';
-      }
-      
-      if (configStatusEl) {
-        configStatusEl.textContent = settings?.cloudflare?.isConfigured
-          ? `✓ Tunnel configured: ${settings?.cloudflare?.tunnelName || 'Unknown'}`
-          : '✗ Tunnel not configured';
-        configStatusEl.style.color = settings?.cloudflare?.isConfigured ? 'var(--success)' : 'var(--warning)';
-        
-        if (settings?.cloudflare?.hostname) {
-          configStatusEl.textContent += ` (${settings.cloudflare.hostname})`;
-        }
-      }
-      
-      if (runningStatusEl) {
-        const isRunning = settings?.cloudflare?.isRunning || tunnelStatus.isRunning;
-        runningStatusEl.textContent = isRunning
-          ? '✓ Tunnel is running'
-          : '✗ Tunnel is not running';
-        runningStatusEl.style.color = isRunning ? 'var(--success)' : 'var(--warning)';
-        
-        if (tunnelStatus.connectors && tunnelStatus.connectors.length > 0) {
-          const activeConnectors = tunnelStatus.connectors.filter(c => 
-            c.status === 'connected' || c.status === 'healthy'
-          ).length;
-          runningStatusEl.textContent += ` (${activeConnectors}/${tunnelStatus.connectors.length} connectors)`;
-        }
-      }
-      
-      // Show repair button if something is wrong
-      if (repairButton) {
-        const needsRepair = !settings?.cloudflare?.isAuthenticated || 
-                           !settings?.cloudflare?.isConfigured || 
-                           !settings?.cloudflare?.isRunning;
-        repairButton.style.display = needsRepair ? 'inline-block' : 'none';
-      }
-      
-      // Update settings object with latest status
-      if (settings?.cloudflare) {
-        settings.cloudflare.status = tunnelStatus.status;
-        settings.cloudflare.tunnelId = tunnelStatus.id;
-        settings.cloudflare.connectors = tunnelStatus.connectors || [];
-      }
-    } catch (error) {
-      // Fallback to basic status
-      statusEl.textContent = settings?.cloudflare?.isAuthenticated
-        ? (settings.cloudflare.isConfigured 
-          ? `Configured (${settings.cloudflare.tunnelName || 'Unknown'})`
-          : 'Authenticated, not configured')
-        : 'Not authenticated';
-      statusEl.style.color = 'var(--warning)';
-      
-      if (authStatusEl) {
-        authStatusEl.textContent = settings?.cloudflare?.isAuthenticated 
-          ? '✓ Authenticated'
-          : '✗ Not authenticated';
-      }
-      
-      console.warn('Failed to fetch tunnel status:', error);
+    // Update settings object with latest status for renderStatusCards
+    if (settings?.cloudflare) {
+      settings.cloudflare.status = tunnelStatus.status;
+      settings.cloudflare.tunnelId = tunnelStatus.id;
+      settings.cloudflare.connectors = tunnelStatus.connectors || [];
     }
   } catch (error) {
-    console.error('Error updating tunnel status:', error);
+    console.warn('Failed to fetch tunnel status:', error);
   }
 }
-
-// Repair tunnel button (only shown when something is wrong)
-const repairTunnelButton = document.getElementById('repair-tunnel-button');
-repairTunnelButton?.addEventListener('click', async () => {
-  try {
-    repairTunnelButton.disabled = true;
-    repairTunnelButton.textContent = 'Repairing...';
-    
-    showAlert('Repairing Cloudflare tunnel connection...', 'info');
-    
-    const result = await postJson('/gateProxyAdmin/api/cloudflare/auto-manage', {});
-    
-    if (result.status === 'SKIPPED') {
-      showAlert(`Tunnel repair skipped: ${result.reason || 'unknown reason'}`, 'warning');
-    } else if (result.status === 'FAILED') {
-      showAlert(`Tunnel repair failed: ${result.error || result.reason || 'unknown error'}`, 'danger');
-    } else {
-      const actionText = result.action === 'created' ? 'created and configured' : 
-                        result.action === 'connected' ? 'connected to existing tunnel' : 
-                        result.action === 'updated' ? 'updated configuration' : 'repaired';
-      showAlert(`Tunnel ${actionText} successfully${result.started ? ' and started' : ''}.`, 'success');
-    }
-    
-    await loadSettings();
-    await updateTunnelStatus();
-  } catch (error) {
-    showAlert(`Repair failed: ${error.message}`, 'danger');
-  } finally {
-    repairTunnelButton.disabled = false;
-    repairTunnelButton.textContent = 'Repair tunnel';
-  }
-});
 
 async function updateCertificateStatus() {
   try {

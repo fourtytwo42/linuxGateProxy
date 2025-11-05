@@ -2,6 +2,7 @@ import fs from 'fs';
 import os from 'os';
 import path from 'path';
 import { spawn } from 'child_process';
+import https from 'https';
 import { commandExists } from '../utils/command.js';
 import { logger } from '../utils/logger.js';
 import { loadConfig } from '../config/index.js';
@@ -150,6 +151,117 @@ export function startLogin() {
 
 export function hasCertificate() {
   return fs.existsSync(DEFAULT_CERT_PATH);
+}
+
+/**
+ * Extract account information from Cloudflare certificate
+ * @returns {Object|null} - { zoneID, accountID, apiToken } or null if not available
+ */
+function getCertificateInfo() {
+  if (!hasCertificate()) {
+    return null;
+  }
+
+  try {
+    const certContent = fs.readFileSync(DEFAULT_CERT_PATH, 'utf8');
+    const base64Match = certContent.match(/-----BEGIN ARGO TUNNEL TOKEN-----\n([\s\S]*?)\n-----END ARGO TUNNEL TOKEN-----/);
+    if (!base64Match) {
+      logger.warn('Certificate file does not contain ARGO TUNNEL TOKEN format');
+      return null;
+    }
+
+    const base64Token = base64Match[1].replace(/\s/g, '');
+    const decoded = Buffer.from(base64Token, 'base64').toString('utf8');
+    const certInfo = JSON.parse(decoded);
+
+    return {
+      zoneID: certInfo.zoneID,
+      accountID: certInfo.accountID,
+      apiToken: certInfo.apiToken
+    };
+  } catch (error) {
+    logger.error('Failed to parse Cloudflare certificate', { error: error.message });
+    return null;
+  }
+}
+
+/**
+ * Get domain name from Cloudflare certificate using Cloudflare API
+ * @returns {Promise<string|null>} - Domain name or null if not available
+ */
+export async function getDomainFromCertificate() {
+  const certInfo = getCertificateInfo();
+  if (!certInfo || !certInfo.zoneID || !certInfo.apiToken) {
+    logger.warn('Cannot get domain from certificate - missing zoneID or apiToken');
+    return null;
+  }
+
+  try {
+    logger.info('Querying Cloudflare API for zone information', { zoneID: certInfo.zoneID });
+
+    return new Promise((resolve, reject) => {
+      const options = {
+        hostname: 'api.cloudflare.com',
+        port: 443,
+        path: `/client/v4/zones/${certInfo.zoneID}`,
+        method: 'GET',
+        headers: {
+          'Authorization': `Bearer ${certInfo.apiToken}`,
+          'Content-Type': 'application/json'
+        }
+      };
+
+      const req = https.request(options, (res) => {
+        let data = '';
+
+        res.on('data', (chunk) => {
+          data += chunk;
+        });
+
+        res.on('end', () => {
+          try {
+            if (res.statusCode !== 200) {
+              logger.warn('Cloudflare API returned non-200 status', { 
+                statusCode: res.statusCode,
+                response: data.slice(0, 200)
+              });
+              resolve(null);
+              return;
+            }
+
+            const response = JSON.parse(data);
+            if (response.success && response.result && response.result.name) {
+              const domain = response.result.name;
+              logger.info('Successfully retrieved domain from Cloudflare certificate', { domain });
+              resolve(domain);
+            } else {
+              logger.warn('Cloudflare API response missing domain name', { response });
+              resolve(null);
+            }
+          } catch (error) {
+            logger.error('Failed to parse Cloudflare API response', { error: error.message });
+            resolve(null);
+          }
+        });
+      });
+
+      req.on('error', (error) => {
+        logger.error('Failed to query Cloudflare API', { error: error.message });
+        resolve(null); // Don't reject - gracefully fall back
+      });
+
+      req.setTimeout(10000, () => {
+        req.destroy();
+        logger.warn('Cloudflare API request timeout');
+        resolve(null);
+      });
+
+      req.end();
+    });
+  } catch (error) {
+    logger.error('Error getting domain from certificate', { error: error.message });
+    return null;
+  }
 }
 
 export function listTunnels() {
@@ -310,12 +422,25 @@ export function createTunnel(tunnelName) {
       return;
     }
 
-    if (!tunnelName) {
+    if (!tunnelName || tunnelName.trim() === '') {
       reject(new Error('Tunnel name is required.'));
       return;
     }
 
-    const proc = spawn('cloudflared', ['tunnel', 'create', tunnelName, '--output', 'json'], {
+    // Ensure tunnel name is valid and trimmed
+    const cleanTunnelName = tunnelName.trim();
+    if (!cleanTunnelName) {
+      reject(new Error('Tunnel name is required.'));
+      return;
+    }
+
+    logger.info('Creating Cloudflare tunnel', { tunnelName: cleanTunnelName, length: cleanTunnelName.length });
+    
+    // Note: tunnel create outputs text, not JSON
+    const args = ['tunnel', 'create', cleanTunnelName];
+    logger.debug('Executing cloudflared command', { args });
+    
+    const proc = spawn('cloudflared', args, {
       env: { ...process.env, NO_COLOR: '1' }
     });
 
@@ -336,20 +461,81 @@ export function createTunnel(tunnelName) {
 
     proc.on('exit', (code) => {
       if (code !== 0) {
-        reject(new Error(`cloudflared tunnel create failed: ${stderr || 'Unknown error'}`));
+        reject(new Error(`cloudflared tunnel create failed: ${stderr || stdout || 'Unknown error'}`));
         return;
       }
 
-      try {
-        const tunnel = JSON.parse(stdout);
-        resolve(tunnel);
-      } catch (error) {
-        // If JSON parsing fails, the tunnel might have been created anyway
-        // Try to get the token for it
-        getTunnelToken(tunnelName)
-          .then((token) => resolve({ name: tunnelName, credentials: token }))
-          .catch(() => resolve({ name: tunnelName }));
+      // cloudflared tunnel create doesn't output JSON by default
+      // It outputs text like "Created tunnel <name> with id <uuid>"
+      // It also outputs the credential file path: "Tunnel credentials written to /path/to/file.json"
+      logger.info('Tunnel created successfully', { 
+        stdout: stdout.trim(), 
+        stderr: stderr.trim(),
+        tunnelName: cleanTunnelName 
+      });
+      
+      // Extract tunnel ID from stdout
+      let tunnelId = null;
+      const idMatch = stdout.match(/with id ([a-f0-9-]+)/i) || stdout.match(/id[:\s]+([a-f0-9-]+)/i);
+      if (idMatch) {
+        tunnelId = idMatch[1];
       }
+      
+      // Extract credential file path from stdout
+      let credentialFile = null;
+      const credFileMatch = stdout.match(/Tunnel credentials written to ([^\s]+\.json)/i);
+      if (credFileMatch) {
+        credentialFile = credFileMatch[1];
+      } else {
+        // Fallback: construct expected path
+        if (tunnelId) {
+          credentialFile = path.join(os.homedir(), '.cloudflared', `${tunnelId}.json`);
+        }
+      }
+      
+      // Read the credential file that cloudflared created
+      let accountTag = '';
+      if (credentialFile && fs.existsSync(credentialFile)) {
+        try {
+          const credContent = fs.readFileSync(credentialFile, 'utf8');
+          const credData = JSON.parse(credContent);
+          accountTag = credData.AccountTag || credData.accountTag || '';
+          logger.info('Read credential file created by cloudflared', { 
+            credentialFile, 
+            tunnelId,
+            accountTag 
+          });
+        } catch (readError) {
+          logger.warn('Failed to read credential file created by cloudflared', { 
+            error: readError.message,
+            credentialFile 
+          });
+        }
+      }
+      
+      // If we don't have tunnel ID, try to get it from the credential file or use the name
+      if (!tunnelId) {
+        if (credentialFile && fs.existsSync(credentialFile)) {
+          try {
+            const credContent = fs.readFileSync(credentialFile, 'utf8');
+            const credData = JSON.parse(credContent);
+            tunnelId = credData.TunnelID || credData.tunnelID || credData.TunnelId || null;
+          } catch (readError) {
+            // Ignore
+          }
+        }
+        // Last resort: use the name as the ID
+        if (!tunnelId) {
+          tunnelId = cleanTunnelName;
+        }
+      }
+      
+      resolve({ 
+        name: cleanTunnelName,
+        id: tunnelId,
+        credentialFile: credentialFile || (tunnelId ? path.join(os.homedir(), '.cloudflared', `${tunnelId}.json`) : null),
+        accountTag
+      });
     });
   });
 }
@@ -751,23 +937,69 @@ export async function setupTunnel({
 
   let tunnelId = null;
   let credentialFile = null;
+  let accountTag = '';
 
   try {
     const tunnel = await createTunnel(sanitizedTunnelName);
     tunnelId = tunnel.id || tunnel.tunnel_id || tunnel.tunnelID || tunnel.uuid || null;
-    logger.info('Cloudflare tunnel created', { name: sanitizedTunnelName, tunnelId });
+    credentialFile = tunnel.credentialFile || null;
+    const accountTagFromTunnel = tunnel.accountTag || '';
+    
+    logger.info('Cloudflare tunnel created', { 
+      name: sanitizedTunnelName, 
+      tunnelId,
+      credentialFile,
+      accountTag: accountTagFromTunnel
+    });
+    
+    // If we got the credential file from createTunnel, use it (don't call getTunnelToken)
+    if (credentialFile) {
+      // Use the values from createTunnel, no need to call getTunnelToken
+      accountTag = accountTagFromTunnel;
+      logger.info('Using credential file from createTunnel, skipping getTunnelToken', { 
+        credentialFile,
+        tunnelId,
+        accountTag 
+      });
+    } else {
+      // Fallback: try to get token (only if we don't have credentialFile from createTunnel)
+      logger.warn('No credential file from createTunnel, attempting to get token');
+      try {
+        const token = await getTunnelToken(sanitizedTunnelName);
+        tunnelId = tunnelId || token.tunnelID || token.TunnelID || token.tunnelId || token.t;
+        credentialFile = token.credentialFile;
+        accountTag = token.AccountTag || token.accountTag || token.a || '';
+      } catch (tokenError) {
+        logger.warn('Failed to get tunnel token, using values from createTunnel', { 
+          error: tokenError.message 
+        });
+        // If we still don't have credentialFile, try to construct it
+        if (!credentialFile && tunnelId) {
+          credentialFile = path.join(os.homedir(), '.cloudflared', `${tunnelId}.json`);
+        }
+      }
+    }
   } catch (error) {
     if (error.message?.includes('already exists')) {
       logger.warn('Cloudflare tunnel already exists, continuing', { tunnelName: sanitizedTunnelName });
+      // Try to get token for existing tunnel
+      try {
+        const token = await getTunnelToken(sanitizedTunnelName);
+        tunnelId = token.tunnelID || token.TunnelID || token.tunnelId || token.t;
+        credentialFile = token.credentialFile;
+        accountTag = token.AccountTag || token.accountTag || token.a || '';
+      } catch (tokenError) {
+        logger.warn('Failed to get token for existing tunnel', { error: tokenError.message });
+      }
     } else {
       throw error;
     }
   }
-
-  const token = await getTunnelToken(sanitizedTunnelName);
-  tunnelId = tunnelId || token.tunnelID || token.TunnelID || token.tunnelId || token.t;
-  credentialFile = token.credentialFile;
-  const accountTag = token.AccountTag || token.accountTag || token.a || '';
+  
+  // Ensure we have a credentialFile
+  if (!credentialFile && tunnelId) {
+    credentialFile = path.join(os.homedir(), '.cloudflared', `${tunnelId}.json`);
+  }
 
   if (!tunnelId) {
     throw new Error('Unable to determine tunnel ID from Cloudflare response.');
@@ -843,8 +1075,49 @@ export async function autoManageTunnel({ hostname, originUrl = 'http://localhost
             tunnelId: existingTunnel.id 
           });
           
-          // Get/refresh credentials
-          const token = await getTunnelToken(existingTunnelName);
+          // Get credentials - try to read existing credential file first
+          const tunnelId = existingTunnel.id;
+          const expectedCredFile = path.join(os.homedir(), '.cloudflared', `${tunnelId}.json`);
+          let credentialFile = expectedCredFile;
+          let accountTag = config.cloudflare?.accountTag || '';
+          
+          // Try to read the credential file if it exists
+          if (fs.existsSync(expectedCredFile)) {
+            try {
+              const credContent = fs.readFileSync(expectedCredFile, 'utf8');
+              const credData = JSON.parse(credContent);
+              accountTag = credData.AccountTag || credData.accountTag || accountTag;
+              logger.info('Read existing credential file', { credentialFile: expectedCredFile, accountTag });
+            } catch (readError) {
+              logger.warn('Failed to read existing credential file, will try getTunnelToken', { 
+                error: readError.message,
+                credentialFile: expectedCredFile 
+              });
+              // Fallback to getTunnelToken if we can't read the file
+              try {
+                const token = await getTunnelToken(existingTunnelName);
+                credentialFile = token.credentialFile;
+                accountTag = token.AccountTag || token.accountTag || token.a || accountTag;
+              } catch (tokenError) {
+                logger.warn('Failed to get tunnel token, using existing config', { 
+                  error: tokenError.message 
+                });
+              }
+            }
+          } else {
+            // No credential file found, try to get token
+            logger.info('Credential file not found, attempting to get token', { credentialFile: expectedCredFile });
+            try {
+              const token = await getTunnelToken(existingTunnelName);
+              credentialFile = token.credentialFile;
+              accountTag = token.AccountTag || token.accountTag || token.a || accountTag;
+            } catch (tokenError) {
+              logger.warn('Failed to get tunnel token, using tunnel ID to construct credential file path', { 
+                error: tokenError.message 
+              });
+              credentialFile = expectedCredFile;
+            }
+          }
           
           // If hostname is provided and different, update config
           if (hostname && config.cloudflare?.hostname !== hostname) {
@@ -854,8 +1127,8 @@ export async function autoManageTunnel({ hostname, originUrl = 'http://localhost
             });
             
             const configFile = writeTunnelConfig({
-              tunnelId: token.tunnelID || token.TunnelID || token.tunnelId || token.t || existingTunnel.id,
-              credentialFile: token.credentialFile,
+              tunnelId: tunnelId,
+              credentialFile: credentialFile,
               originUrl: originUrl,
               hostname: hostname
             });
@@ -868,12 +1141,12 @@ export async function autoManageTunnel({ hostname, originUrl = 'http://localhost
             return {
               status: 'CONNECTED',
               tunnelName: existingTunnelName,
-              tunnelId: existingTunnel.id,
+              tunnelId: tunnelId,
               hostname,
               originUrl,
-              credentialFile: token.credentialFile,
+              credentialFile: credentialFile,
               configFile,
-              accountTag: token.AccountTag || token.accountTag || token.a || '',
+              accountTag: accountTag,
               action: 'updated'
             };
           }
@@ -881,12 +1154,12 @@ export async function autoManageTunnel({ hostname, originUrl = 'http://localhost
           return {
             status: 'CONNECTED',
             tunnelName: existingTunnelName,
-            tunnelId: existingTunnel.id,
+            tunnelId: tunnelId,
             hostname: config.cloudflare?.hostname || hostname,
             originUrl: config.cloudflare?.originUrl || originUrl,
-            credentialFile: token.credentialFile,
+            credentialFile: credentialFile,
             configFile: config.cloudflare?.configFile,
-            accountTag: token.AccountTag || token.accountTag || token.a || config.cloudflare?.accountTag || '',
+            accountTag: accountTag,
             action: 'existing'
           };
         }
@@ -910,9 +1183,56 @@ export async function autoManageTunnel({ hostname, originUrl = 'http://localhost
         tunnelId: tunnelToUse.id 
       });
       
-      const token = await getTunnelToken(tunnelToUse.name);
+      // Get credentials - try to read existing credential file first
+      const tunnelId = tunnelToUse.id;
+      const expectedCredFile = path.join(os.homedir(), '.cloudflared', `${tunnelId}.json`);
+      let credentialFile = expectedCredFile;
+      let accountTag = '';
       
-      // Extract hostname from publicBaseUrl if not provided
+      // Try to read the credential file if it exists
+      if (fs.existsSync(expectedCredFile)) {
+        try {
+          const credContent = fs.readFileSync(expectedCredFile, 'utf8');
+          const credData = JSON.parse(credContent);
+          accountTag = credData.AccountTag || credData.accountTag || '';
+          logger.info('Read existing credential file for tunnel', { 
+            credentialFile: expectedCredFile, 
+            accountTag,
+            tunnelName: tunnelToUse.name 
+          });
+        } catch (readError) {
+          logger.warn('Failed to read existing credential file, will try getTunnelToken', { 
+            error: readError.message,
+            credentialFile: expectedCredFile 
+          });
+          // Fallback to getTunnelToken if we can't read the file
+          try {
+            const token = await getTunnelToken(tunnelToUse.name);
+            credentialFile = token.credentialFile;
+            accountTag = token.AccountTag || token.accountTag || token.a || '';
+          } catch (tokenError) {
+            logger.warn('Failed to get tunnel token, using tunnel ID', { 
+              error: tokenError.message 
+            });
+            credentialFile = expectedCredFile;
+          }
+        }
+      } else {
+        // No credential file found, try to get token
+        logger.info('Credential file not found, attempting to get token', { credentialFile: expectedCredFile });
+        try {
+          const token = await getTunnelToken(tunnelToUse.name);
+          credentialFile = token.credentialFile;
+          accountTag = token.AccountTag || token.accountTag || token.a || '';
+        } catch (tokenError) {
+          logger.warn('Failed to get tunnel token, using tunnel ID to construct credential file path', { 
+            error: tokenError.message 
+          });
+          credentialFile = expectedCredFile;
+        }
+      }
+      
+      // Extract hostname - try in order: provided hostname, publicBaseUrl, certificate domain
       let finalHostname = hostname;
       if (!finalHostname) {
         const publicBaseUrl = config.site?.publicBaseUrl?.trim();
@@ -930,22 +1250,30 @@ export async function autoManageTunnel({ hostname, originUrl = 'http://localhost
         }
       }
       
+      // If still no hostname, try to get domain from certificate
+      if (!finalHostname) {
+        const certDomain = await getDomainFromCertificate();
+        if (certDomain) {
+          finalHostname = certDomain;
+          logger.info('Extracted hostname from Cloudflare certificate', { hostname: finalHostname });
+        }
+      }
+      
       if (!finalHostname) {
         logger.warn('No hostname available - tunnel will be created but DNS routing requires hostname');
         return {
           status: 'PARTIAL',
           tunnelName: tunnelToUse.name,
-          tunnelId: tunnelToUse.id,
-          credentialFile: token.credentialFile,
-          accountTag: token.AccountTag || token.accountTag || token.a || '',
+          tunnelId: tunnelId,
+          credentialFile: credentialFile,
+          accountTag: accountTag,
           reason: 'hostname required for DNS routing'
         };
       }
       
-      const tunnelId = token.tunnelID || token.TunnelID || token.tunnelId || token.t || tunnelToUse.id;
       const configFile = writeTunnelConfig({
         tunnelId,
-        credentialFile: token.credentialFile,
+        credentialFile: credentialFile,
         originUrl,
         hostname: finalHostname
       });
@@ -964,16 +1292,17 @@ export async function autoManageTunnel({ hostname, originUrl = 'http://localhost
         tunnelId,
         hostname: finalHostname,
         originUrl,
-        credentialFile: token.credentialFile,
+        credentialFile: credentialFile,
         configFile,
-        accountTag: token.AccountTag || token.accountTag || token.a || '',
+        accountTag: accountTag,
         action: 'connected'
       };
     }
     
-    // No existing tunnels - create new one
+    // No existing tunnels found - create new one (first time setup)
     logger.info('No existing tunnels found, creating new tunnel');
     
+    // Try to get hostname from: provided hostname, publicBaseUrl, or certificate domain
     if (!hostname) {
       const publicBaseUrl = config.site?.publicBaseUrl?.trim();
       if (publicBaseUrl) {
@@ -990,8 +1319,18 @@ export async function autoManageTunnel({ hostname, originUrl = 'http://localhost
       }
     }
     
+    // If still no hostname, try to get domain from certificate
     if (!hostname) {
-      logger.warn('Cannot create tunnel without hostname - publicBaseUrl not configured');
+      const certDomain = await getDomainFromCertificate();
+      if (certDomain) {
+        hostname = certDomain;
+        logger.info('Extracted hostname from Cloudflare certificate for new tunnel', { hostname });
+        logger.info('Note: Using root domain from certificate. If you want a specific subdomain, set publicBaseUrl in settings.');
+      }
+    }
+    
+    if (!hostname) {
+      logger.warn('Cannot create tunnel without hostname - publicBaseUrl not configured and certificate domain not available');
       return {
         status: 'FAILED',
         reason: 'hostname required but not available'
@@ -1000,23 +1339,66 @@ export async function autoManageTunnel({ hostname, originUrl = 'http://localhost
     
     const tunnelName = `gateproxy-${hostname.replace(/[^a-zA-Z0-9-]+/g, '-').replace(/-{2,}/g, '-').replace(/^-+|-+$/g, '').toLowerCase()}`;
     
-    const setupResult = await setupTunnel({
-      tunnelName,
-      hostname,
-      originUrl
-    });
-    
-    logger.info('Created new Cloudflare tunnel', {
-      tunnelName: setupResult.tunnelName,
-      tunnelId: setupResult.tunnelId,
-      hostname: setupResult.hostname
-    });
-    
-    return {
-      status: 'CREATED',
-      ...setupResult,
-      action: 'created'
-    };
+    // Try to create tunnel - if it already exists (race condition with other servers), that's okay
+    try {
+      const setupResult = await setupTunnel({
+        tunnelName,
+        hostname,
+        originUrl
+      });
+      
+      logger.info('Created new Cloudflare tunnel', {
+        tunnelName: setupResult.tunnelName,
+        tunnelId: setupResult.tunnelId,
+        hostname: setupResult.hostname
+      });
+      
+      return {
+        status: 'CREATED',
+        ...setupResult,
+        action: 'created'
+      };
+    } catch (error) {
+      // If tunnel creation fails because it already exists (race condition), try to connect to it
+      if (error.message?.includes('already exists') || error.message?.includes('duplicate')) {
+        logger.info('Tunnel already exists (likely created by another server), connecting to it', { tunnelName });
+        
+        // Try to connect to the existing tunnel
+        const token = await getTunnelToken(tunnelName);
+        const tunnelId = token.tunnelID || token.TunnelID || token.tunnelId || token.t || tunnelName;
+        const credentialFile = token.credentialFile;
+        const accountTag = token.AccountTag || token.accountTag || token.a || '';
+        
+        const configFile = writeTunnelConfig({
+          tunnelId,
+          credentialFile,
+          originUrl,
+          hostname
+        });
+        
+        // Try to route DNS (may fail if already routed, that's okay)
+        try {
+          await routeTunnelDns(tunnelName, hostname);
+        } catch (routeError) {
+          logger.debug('DNS routing failed (may already be configured)', { error: routeError.message });
+        }
+        
+        return {
+          status: 'CONNECTED',
+          tunnelName,
+          tunnelId,
+          hostname,
+          originUrl,
+          credentialFile,
+          configFile,
+          accountTag,
+          action: 'connected'
+        };
+      }
+      
+      // Re-throw other errors
+      throw error;
+    }
     
   } catch (error) {
     logger.error('Automatic tunnel management failed', { error: error.message, stack: error.stack });

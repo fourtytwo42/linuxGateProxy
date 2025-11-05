@@ -22,15 +22,20 @@ import { loadConfig, getSecret, setSecret } from '../config/index.js';
 import { logger } from '../utils/logger.js';
 import { getCachedHostnameMapping } from './dnsService.js';
 
-function buildUrl({ useLdaps, ldapHost, ldapPort }) {
+function buildUrl({ useLdaps, ldapHost, ldapPort, ldapsPort }) {
   const protocol = useLdaps ? 'ldaps' : 'ldap';
+  
+  // Use ldapsPort if available and useLdaps is true, otherwise use ldapPort
+  const port = useLdaps 
+    ? (ldapsPort || ldapPort || 636)
+    : (ldapPort || 389);
   
   // Check if we have a cached IP for this hostname
   // If DNS fails but we have a cached IP, use it directly
   const cachedIp = getCachedHostnameMapping(ldapHost);
   const hostToUse = cachedIp || ldapHost;
   
-  return `${protocol}://${hostToUse}:${ldapPort}`;
+  return `${protocol}://${hostToUse}:${port}`;
 }
 
 /**
@@ -72,12 +77,21 @@ function createClient(config, { rejectUnauthorized = false } = {}) {
   }
   
   const cachedIp = getCachedHostnameMapping(config.auth.ldapHost);
+  
+  // Determine if we should use LDAPS (prefer ldapsPort if available)
+  const useLdaps = config.auth.useLdaps !== false; // Default to true
+  
   const options = {
-    url: buildUrl(config.auth),
+    url: buildUrl({ 
+      useLdaps, 
+      ldapHost: config.auth.ldapHost, 
+      ldapPort: config.auth.ldapPort,
+      ldapsPort: config.auth.ldapsPort 
+    }),
     timeout: 5000
   };
   
-  if (config.auth.useLdaps) {
+  if (useLdaps) {
     options.tlsOptions = getTlsOptions(config.auth.ldapHost, cachedIp, rejectUnauthorized);
   }
   
@@ -283,7 +297,10 @@ export async function testServiceBind(settings, password, { rejectUnauthorized =
   // If autoDetect is true, try LDAPS first, then fall back to LDAP
   // Otherwise, use the specified useLdaps setting
   let useLdaps = settings.useLdaps !== undefined ? Boolean(settings.useLdaps) : true; // Default to LDAPS
-  let ldapPort = settings.ldapPort || (useLdaps ? 636 : 389);
+  // Use ldapsPort if available and useLdaps is true, otherwise use ldapPort
+  let ldapPort = useLdaps 
+    ? (settings.ldapsPort || settings.ldapPort || 636)
+    : (settings.ldapPort || 389);
   
   // Generate username formats to try - be flexible and try multiple variants
   const usernameFormatsList = [];
@@ -359,15 +376,15 @@ export async function testServiceBind(settings, password, { rejectUnauthorized =
   // Try LDAPS first if auto-detect is enabled, otherwise use specified setting
   if (autoDetect) {
     // Always try LDAPS first on port 636 (or custom LDAPS port)
-    const ldapsPort = settings.ldapsPort || settings.ldapPort || 636;
-    const ldapPortFallback = settings.ldapPort || settings.ldapPortFallback || 389; // LDAP port for fallback
+    const ldapsPort = settings.ldapsPort || 636;
+    const ldapPortFallback = settings.ldapPort || 389; // LDAP port for fallback
     
     logger.debug('Auto-detecting connection: trying LDAPS first', { ldapHost: settings.ldapHost, ldapsPort, ldapPortFallback });
     
     // Try LDAPS first
     const cachedIp = getCachedHostnameMapping(settings.ldapHost);
     const ldapsClient = new Client({
-      url: buildUrl({ useLdaps: true, ldapHost: settings.ldapHost, ldapPort: ldapsPort }),
+      url: buildUrl({ useLdaps: true, ldapHost: settings.ldapHost, ldapPort: settings.ldapPort, ldapsPort: ldapsPort }),
       timeout: 5000,
       tlsOptions: getTlsOptions(settings.ldapHost, cachedIp, rejectUnauthorized)
     });
@@ -404,7 +421,7 @@ export async function testServiceBind(settings, password, { rejectUnauthorized =
     const cachedIpFallback = getCachedHostnameMapping(settings.ldapHost);
     const starttlsTlsOptions = getTlsOptions(settings.ldapHost, cachedIpFallback, rejectUnauthorized);
     const starttlsClient = new Client({
-      url: buildUrl({ useLdaps: false, ldapHost: settings.ldapHost, ldapPort: ldapPortFallback }),
+      url: buildUrl({ useLdaps: false, ldapHost: settings.ldapHost, ldapPort: ldapPortFallback, ldapsPort: settings.ldapsPort }),
       timeout: 5000
     });
     
@@ -454,8 +471,14 @@ export async function testServiceBind(settings, password, { rejectUnauthorized =
   // Try the specified protocol (or LDAP if auto-detect fell back)
   const cachedIp = getCachedHostnameMapping(settings.ldapHost);
   
-  // Ensure we're using plain LDAP (no TLS) when useLdaps is false
-  const clientUrl = buildUrl({ useLdaps, ldapHost: settings.ldapHost, ldapPort });
+  // Build URL - ldapPort variable already contains the correct port to use
+  // Pass ldapsPort for backward compatibility with buildUrl function
+  const clientUrl = buildUrl({ 
+    useLdaps, 
+    ldapHost: settings.ldapHost, 
+    ldapPort: ldapPort, 
+    ldapsPort: useLdaps ? (settings.ldapsPort || ldapPort) : undefined
+  });
   logger.debug('Creating LDAP client', { url: clientUrl, useLdaps, ldapPort });
   
   const clientOptions = {

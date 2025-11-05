@@ -20,7 +20,7 @@ import { handleProxy, upgradeProxy } from './services/proxyService.js';
 import * as certService from './services/certService.js';
 import { purgeExpiredOtps } from './services/otpService.js';
 import { logger } from './utils/logger.js';
-import { hasCertificate } from './services/cloudflareService.js';
+import { hasCertificate, stopTunnel } from './services/cloudflareService.js';
 
 const scriptsDir = path.join(projectRoot, 'scripts');
 
@@ -356,25 +356,39 @@ async function startServer() {
 
   const config = loadConfig();
 
-  // Auto-request certificate on startup if CA is found but cert doesn't exist
+  // Automatic certificate management (runs on startup and periodically)
   (async () => {
     try {
-      const certStatus = await certService.getCertificateStatus();
-      if (certStatus.caFound && !certStatus.hasCertificate) {
-        logger.info('CA found but no certificate exists, attempting automatic certificate request');
-        try {
-          await certService.requestCertificate();
-          logger.info('Automatic certificate request successful');
-          // Restart HTTPS server if it wasn't started
-          // Note: In production, you might want to restart the server or reload HTTPS config
-        } catch (error) {
-          logger.warn('Automatic certificate request failed, will retry on next check', { error: error.message });
-        }
+      const result = await certService.autoManageCertificate();
+      if (result.status === 'SUCCESS') {
+        logger.info('Automatic certificate management completed', { 
+          action: result.action,
+          certPath: result.certPath 
+        });
+      } else if (result.status === 'SKIPPED') {
+        logger.debug('Certificate auto-management skipped', { reason: result.reason });
+      } else if (result.status === 'FAILED') {
+        logger.warn('Certificate auto-management failed', { 
+          error: result.error,
+          reason: result.reason 
+        });
       }
     } catch (error) {
-      logger.debug('Certificate auto-request check failed', { error: error.message });
+      logger.error('Certificate auto-management error', { error: error.message });
     }
   })();
+
+  // Periodic certificate renewal check (every 24 hours)
+  setInterval(async () => {
+    try {
+      const result = await certService.autoManageCertificate();
+      if (result.status === 'SUCCESS') {
+        logger.info('Periodic certificate renewal completed', { action: result.action });
+      }
+    } catch (error) {
+      logger.warn('Periodic certificate renewal check failed', { error: error.message });
+    }
+  }, 24 * 60 * 60 * 1000); // 24 hours
 
   setInterval(() => purgeExpiredOtps(), 60 * 1000);
 
@@ -539,13 +553,21 @@ async function startServer() {
 
   process.on('SIGINT', () => {
     logger.info('Received SIGINT, shutting down');
-    stopTunnel();
+    try {
+      stopTunnel();
+    } catch (error) {
+      logger.warn('Error stopping tunnel during shutdown', { error: error.message });
+    }
     server.close(() => process.exit(0));
   });
 
   process.on('SIGTERM', () => {
     logger.info('Received SIGTERM, shutting down');
-    stopTunnel();
+    try {
+      stopTunnel();
+    } catch (error) {
+      logger.warn('Error stopping tunnel during shutdown', { error: error.message });
+    }
     server.close(() => process.exit(0));
   });
 }
