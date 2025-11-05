@@ -398,6 +398,42 @@ router.post('/api/setup/smtp', (req, res) => {
   res.json({ success: true });
 });
 
+router.post('/api/setup/smtp/test', async (req, res, next) => {
+  try {
+    const {
+      host,
+      port = 587,
+      secure = false,
+      username = '',
+      password = '',
+      fromAddress = ''
+    } = req.body;
+
+    if (!host) {
+      return res.status(400).json({ success: false, message: 'SMTP host is required' });
+    }
+
+    const secureFlag = typeof secure === 'string'
+      ? ['true', '1', 'on', 'yes'].includes(secure.toLowerCase())
+      : Boolean(secure);
+
+    const smtpConfig = {
+      host,
+      port: Number(port) || 587,
+      secure: secureFlag,
+      username,
+      fromAddress
+    };
+
+    const { testSmtpConnection } = await import('../services/otpService.js');
+    const result = await testSmtpConnection(smtpConfig, password || null);
+
+    res.json(result);
+  } catch (error) {
+    next(error);
+  }
+});
+
 
 
 

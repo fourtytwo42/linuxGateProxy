@@ -902,8 +902,79 @@ async function navigateAfterServerSetup() {
   }
 }
 
-// Step 4 - Email Setup (conditional - only shown if OTP enabled)
+// Track email test status
+let emailTestPassed = false;
+
 if (emailForm) {
+  const testEmailBtn = document.getElementById('test-email-connection');
+  const emailTestStatus = document.getElementById('email-test-status');
+  const emailContinueBtn = document.getElementById('email-continue-btn');
+  
+  // Test SMTP connection
+  testEmailBtn?.addEventListener('click', async (event) => {
+    event.preventDefault();
+    clearAlert();
+    
+    const form = emailForm;
+    const payload = serializeForm(form);
+    
+    if (!payload.smtpHost) {
+      showAlert('Please enter an SMTP host before testing.');
+      return;
+    }
+    
+    // Show testing status
+    if (emailTestStatus) {
+      emailTestStatus.style.display = 'block';
+      const statusIndicator = emailTestStatus.querySelector('.status-indicator');
+      const statusText = emailTestStatus.querySelector('.status-text');
+      statusIndicator.className = 'status-indicator status-connecting';
+      statusText.textContent = 'Testing SMTP connection...';
+    }
+    
+    testEmailBtn.disabled = true;
+    
+    try {
+      const result = await postJson('/api/setup/smtp/test', {
+        host: payload.smtpHost,
+        port: Number(payload.smtpPort) || 587,
+        secure: !!payload.smtpSecure,
+        username: payload.smtpUsername || '',
+        password: payload.smtpPassword || '',
+        fromAddress: payload.smtpFrom || ''
+      });
+      
+      const statusIndicator = emailTestStatus?.querySelector('.status-indicator');
+      const statusText = emailTestStatus?.querySelector('.status-text');
+      
+      if (result.success) {
+        emailTestPassed = true;
+        if (statusIndicator && statusText) {
+          statusIndicator.className = 'status-indicator status-secure';
+          statusText.textContent = 'SMTP connection successful!';
+        }
+      } else {
+        emailTestPassed = false;
+        if (statusIndicator && statusText) {
+          statusIndicator.className = 'status-indicator status-insecure';
+          statusText.textContent = `SMTP connection failed: ${result.message || 'Unknown error'}`;
+        }
+        showAlert(`SMTP test failed: ${result.message || 'Unknown error'}`);
+      }
+    } catch (error) {
+      emailTestPassed = false;
+      const statusIndicator = emailTestStatus?.querySelector('.status-indicator');
+      const statusText = emailTestStatus?.querySelector('.status-text');
+      if (statusIndicator && statusText) {
+        statusIndicator.className = 'status-indicator status-insecure';
+        statusText.textContent = `SMTP test failed: ${error.message || 'Unknown error'}`;
+      }
+      showAlert(error.message || 'SMTP test failed');
+    } finally {
+      testEmailBtn.disabled = false;
+    }
+  });
+  
   // Skip email setup button
   document.getElementById('skip-email-setup')?.addEventListener('click', async (event) => {
     event.preventDefault();
@@ -935,6 +1006,16 @@ if (emailForm) {
     clearAlert();
     const form = event.target;
     const payload = serializeForm(form);
+    
+    // If test failed, disable OTP before proceeding
+    if (!emailTestPassed) {
+      if (setupState.site) {
+        setupState.site.enableOtp = false;
+        setupState.enableOtp = false;
+        await postJson('/api/setup/site', setupState.site);
+      }
+      showAlert('Email test failed. OTP has been disabled. You can fix the email settings and test again, or continue without email OTP.');
+    }
     
     const smtpPayload = {
       host: payload.smtpHost || '',

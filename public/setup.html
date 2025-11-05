@@ -293,12 +293,24 @@
                 <small class="muted small">Where replies to notifications should go</small>
               </label>
             </fieldset>
+
+            <div style="margin-top: 1.5rem; padding-top: 1.5rem; border-top: 1px solid var(--border-color);">
+              <button type="button" class="outline" id="test-email-connection" style="width: 100%;">
+                <span>Test SMTP connection</span>
+              </button>
+              <div id="email-test-status" style="margin-top: 1rem; display: none;">
+                <div class="connection-status">
+                  <span class="status-indicator"></span>
+                  <span class="status-text"></span>
+                </div>
+              </div>
+            </div>
           </div>
 
           <footer class="step-footer">
             <button class="ghost" type="button" data-action="prev">Back</button>
             <button class="ghost" type="button" id="skip-email-setup">Skip (OTP will be disabled)</button>
-            <button class="primary" type="submit">Save &amp; continue</button>
+            <button class="primary" type="submit" id="email-continue-btn">Save &amp; continue</button>
           </footer>
         </form>
 

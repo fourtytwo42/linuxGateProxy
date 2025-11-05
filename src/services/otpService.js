@@ -9,20 +9,20 @@ function generateCode() {
   return String(Math.floor(100000 + Math.random() * 900000));
 }
 
-function createTransport() {
-  const config = loadConfig();
-  if (!config.smtp.host) {
+function createTransport(smtpConfig = null, password = null) {
+  const config = smtpConfig || loadConfig().smtp;
+  if (!config.host) {
     throw new Error('SMTP server not configured');
   }
-  const password = getSecret('smtp.password');
+  const smtpPassword = password || getSecret('smtp.password');
   const transporter = nodemailer.createTransport({
-    host: config.smtp.host,
-    port: config.smtp.port,
-    secure: config.smtp.secure,
-    auth: config.smtp.username
+    host: config.host,
+    port: config.port,
+    secure: config.secure,
+    auth: config.username
       ? {
-        user: config.smtp.username,
-        pass: password
+        user: config.username,
+        pass: smtpPassword
       }
       : undefined,
     tls: {
@@ -30,6 +30,17 @@ function createTransport() {
     }
   });
   return transporter;
+}
+
+export async function testSmtpConnection(smtpConfig, password) {
+  try {
+    const transporter = createTransport(smtpConfig, password);
+    await transporter.verify();
+    return { success: true, message: 'SMTP connection successful' };
+  } catch (error) {
+    logger.error('SMTP connection test failed', { error: error.message });
+    return { success: false, message: error.message || 'SMTP connection failed' };
+  }
 }
 
 export function storeSmtpPassword(password) {

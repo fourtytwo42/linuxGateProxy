@@ -101,12 +101,14 @@ small {
   box-shadow: 0 6px 16px -10px var(--brand);
 }
 
-.button.is-outline {
+.button.is-outline,
+.button.outline {
   background: transparent;
   border-color: color-mix(in srgb, var(--text-muted) 35%, transparent);
 }
 
-.button.is-outline:hover {
+.button.is-outline:hover,
+.button.outline:hover {
   border-color: var(--brand);
   color: var(--brand-contrast);
   background: color-mix(in srgb, var(--brand) 18%, transparent);
