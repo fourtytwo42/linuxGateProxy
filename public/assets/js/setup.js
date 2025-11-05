@@ -21,7 +21,6 @@ const setupState = {
   prereqs: null,
   ldap: null,
   site: null,
-  samba: null,
   cloudflare: null,
   resources: null
 };
@@ -281,7 +280,6 @@ function applyStatus(status, { updateForms = false } = {}) {
 function prepareSummary() {
   const ldap = setupState.ldap || {};
   const site = setupState.site || {};
-  const samba = setupState.samba || { shareName: 'GateProxySetup' };
   const resources = setupState.resources || { targetHost: 'Not configured', resources: [] };
   summaryBox.innerHTML = `
     <article class="message is-primary">
@@ -296,12 +294,6 @@ function prepareSummary() {
       <div class="message-body">
         <p><strong>Public URL:</strong> ${site.publicBaseUrl || 'Not set'}</p>
         <p><strong>Session Hours:</strong> ${site.sessionHours || '?'} </p>
-      </div>
-    </article>
-    <article class="message is-primary">
-      <div class="message-header"><p>Samba</p></div>
-      <div class="message-body">
-        <p><strong>Share Name:</strong> ${samba.shareName || 'GateProxySetup'}</p>
       </div>
     </article>
     <article class="message is-primary">
