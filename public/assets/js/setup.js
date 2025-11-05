@@ -808,7 +808,12 @@ step4Div?.querySelector('button[data-action="next"]')?.addEventListener('click',
 });
 
 // Step 4 - Cloudflare
-document.getElementById('cloudflare-start').addEventListener('click', async (event) => {
+let cloudflarePollInterval = null;
+
+const cloudflareStartBtn = document.getElementById('cloudflare-start');
+const cloudflareNextBtn = document.getElementById('cloudflare-next');
+
+cloudflareStartBtn.addEventListener('click', async (event) => {
   event.preventDefault();
   cloudflareStatus.innerHTML = '<p>Requesting login link...</p>';
   try {
@@ -824,12 +829,44 @@ document.getElementById('cloudflare-start').addEventListener('click', async (eve
       setupState.cloudflare = { configured: true };
     } else if (response.url) {
       cloudflareStatus.innerHTML = `
-        <p class="mb-2">Open the following URL to authenticate with Cloudflare:</p>
-        <p><a href="${response.url}" target="_blank" rel="noopener">${response.url}</a></p>
-        ${response.deviceCode ? `<p class="mt-2">Device Code: <strong>${response.deviceCode}</strong></p>` : ''}
-        <p class="mt-3">After authenticating, click Continue below.</p>
+        <div id="cloudflare-url-container">
+          <p class="mb-2">Open the following URL to authenticate with Cloudflare:</p>
+          <p><a href="${response.url}" target="_blank" rel="noopener" id="cloudflare-url">${response.url}</a></p>
+          ${response.deviceCode ? `<p class="mt-2">Device Code: <strong>${response.deviceCode}</strong></p>` : ''}
+          <p class="mt-3" id="cloudflare-waiting">Waiting for authentication...</p>
+        </div>
       `;
       setupState.cloudflare = { configured: false, url: response.url };
+      
+      // Start polling for authentication
+      if (cloudflarePollInterval) {
+        clearInterval(cloudflarePollInterval);
+      }
+      cloudflarePollInterval = setInterval(async () => {
+        try {
+          const checkResponse = await getJson('/api/setup/cloudflare/check');
+          if (checkResponse.authenticated) {
+            clearInterval(cloudflarePollInterval);
+            cloudflarePollInterval = null;
+            
+            // Hide URL and show success message
+            const urlContainer = document.getElementById('cloudflare-url-container');
+            if (urlContainer) {
+              urlContainer.style.display = 'none';
+            }
+            
+            cloudflareStatus.innerHTML = `
+              <div class="notification is-success">
+                <p><strong>✓ You are authorized!</strong></p>
+                <p>Cloudflare authentication is complete. Click Continue to proceed.</p>
+              </div>
+            `;
+            setupState.cloudflare = { configured: true };
+          }
+        } catch (error) {
+          // Ignore polling errors, just continue checking
+        }
+      }, 2000); // Check every 2 seconds
     } else {
       cloudflareStatus.innerHTML = `<p class="has-text-danger">No login URL was generated.</p>`;
     }
@@ -837,6 +874,20 @@ document.getElementById('cloudflare-start').addEventListener('click', async (eve
     cloudflareStatus.innerHTML = `<p class="has-text-danger">${error.message}</p>`;
   }
 });
+
+// Clean up polling when leaving the step
+const cloudflareStep = document.getElementById('step-5');
+if (cloudflareStep) {
+  const observer = new MutationObserver(() => {
+    if (!cloudflareStep.classList.contains('active')) {
+      if (cloudflarePollInterval) {
+        clearInterval(cloudflarePollInterval);
+        cloudflarePollInterval = null;
+      }
+    }
+  });
+  observer.observe(cloudflareStep, { attributes: true, attributeFilter: ['class'] });
+}
 
 document.getElementById('cloudflare-next').addEventListener('click', async (event) => {
   event.preventDefault();
